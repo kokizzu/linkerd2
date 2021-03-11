@@ -71,12 +71,8 @@ type Service struct {
 var LinkerdDeployReplicasStable = map[string]DeploySpec{
 	"linkerd-controller":     {"linkerd", 1, []string{"public-api"}},
 	"linkerd-destination":    {"linkerd", 1, []string{"destination"}},
-	"linkerd-tap":            {"linkerd", 1, []string{"tap"}},
-	"linkerd-grafana":        {"linkerd", 1, []string{}},
 	"linkerd-identity":       {"linkerd", 1, []string{"identity"}},
-	"linkerd-prometheus":     {"linkerd", 1, []string{}},
 	"linkerd-sp-validator":   {"linkerd", 1, []string{"sp-validator"}},
-	"linkerd-web":            {"linkerd", 1, []string{"web"}},
 	"linkerd-proxy-injector": {"linkerd", 1, []string{"proxy-injector"}},
 }
 
