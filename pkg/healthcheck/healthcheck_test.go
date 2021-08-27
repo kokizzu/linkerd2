@@ -479,54 +479,6 @@ status:
 
 }
 
-func TestCheckCapability(t *testing.T) {
-	tests := []struct {
-		k8sConfigs []string
-		err        error
-	}{
-		{
-			[]string{},
-			nil,
-		},
-		{
-			[]string{`apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: restricted
-spec:
-  requiredDropCapabilities:
-    - ALL`,
-			},
-			fmt.Errorf("found 1 PodSecurityPolicies, but none provide TEST_CAP, proxy injection will fail if the PSP admission controller is running"),
-		},
-	}
-
-	for i, test := range tests {
-		test := test // pin
-		t.Run(fmt.Sprintf("%d: returns expected capability result", i), func(t *testing.T) {
-			hc := NewHealthChecker(
-				[]CategoryID{},
-				&Options{},
-			)
-
-			var err error
-			hc.kubeAPI, err = k8s.NewFakeAPI(test.k8sConfigs...)
-			if err != nil {
-				t.Fatalf("Unexpected error: %s", err)
-			}
-
-			err = hc.checkCapability(context.Background(), "TEST_CAP")
-			if err != nil || test.err != nil {
-				if (err == nil && test.err != nil) ||
-					(err != nil && test.err == nil) ||
-					(err.Error() != test.err.Error()) {
-					t.Fatalf("Unexpected error (Expected: %s, Got: %s)", test.err, err)
-				}
-			}
-		})
-	}
-}
-
 func TestConfigExists(t *testing.T) {
 	testCases := []struct {
 		k8sConfigs []string
@@ -993,7 +945,6 @@ metadata:
 				"linkerd-config control plane CustomResourceDefinitions exist",
 				"linkerd-config control plane MutatingWebhookConfigurations exist",
 				"linkerd-config control plane ValidatingWebhookConfigurations exist",
-				"linkerd-config control plane PodSecurityPolicies exist: missing PodSecurityPolicies: linkerd-test-ns-control-plane",
 			},
 		},
 		{
@@ -1104,14 +1055,6 @@ metadata:
   labels:
     linkerd.io/control-plane-ns: test-ns
 `,
-				`
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: linkerd-test-ns-control-plane
-  labels:
-    linkerd.io/control-plane-ns: test-ns
-`,
 			},
 			[]string{
 				"linkerd-config control plane Namespace exists",
@@ -1121,7 +1064,6 @@ metadata:
 				"linkerd-config control plane CustomResourceDefinitions exist",
 				"linkerd-config control plane MutatingWebhookConfigurations exist",
 				"linkerd-config control plane ValidatingWebhookConfigurations exist",
-				"linkerd-config control plane PodSecurityPolicies exist",
 			},
 		},
 	}
@@ -1199,6 +1141,107 @@ data:
 			hc.RunChecks(obs.resultFn)
 			if !reflect.DeepEqual(obs.results, testCase.expected) {
 				t.Fatalf("Expected results %v, but got %v", testCase.expected, obs.results)
+			}
+		})
+	}
+}
+
+func TestCheckClusterNetworks(t *testing.T) {
+	var testCases = []struct {
+		checkDescription string
+		k8sConfigs       []string
+		expected         []string
+	}{
+		{
+			checkDescription: "cluster networks contains all node podCIDRs",
+			k8sConfigs: []string{`
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-ns
+`,
+				`
+apiVersion: v1
+kind: Node
+metadata:
+  name: linkerd-test-ns-identity
+spec:
+  podCIDR: 90.10.90.24/24
+`,
+				`
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: linkerd-config
+  namespace: test-ns
+  labels:
+    linkerd.io/control-plane-ns: test-ns
+data:
+  values: |
+    clusterNetworks: "10.0.0.0/8,100.64.0.0/10,172.16.0.0/12,192.168.0.0/16"
+`,
+			},
+			expected: []string{
+				"linkerd-existence cluster networks contains all node podCIDRs: node has podCIDR(s) [90.10.90.24/24] which are not contained in the Linkerd clusterNetworks.\n\tTry installing linkerd via --set clusterNetworks=90.10.90.24/24",
+			},
+		},
+		{
+			checkDescription: "cluster networks contains all node podCIDRs",
+			k8sConfigs: []string{`
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: test-ns
+`,
+				`
+apiVersion: v1
+kind: Node
+metadata:
+  name: linkerd-test-ns-identity
+spec:
+  podCIDR: 10.0.0.24/24
+`,
+				`
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: linkerd-config
+  namespace: test-ns
+  labels:
+    linkerd.io/control-plane-ns: test-ns
+data:
+  values: |
+    clusterNetworks: "10.0.0.0/8,100.64.0.0/10,172.16.0.0/12,192.168.0.0/16"
+`,
+			},
+			expected: []string{
+				"linkerd-existence cluster networks contains all node podCIDRs",
+			},
+		},
+	}
+
+	for i, tc := range testCases {
+		tc := tc // pin
+		t.Run(fmt.Sprintf("%d: returns expected config result", i), func(t *testing.T) {
+			hc := NewHealthChecker(
+				[]CategoryID{},
+				&Options{
+					ControlPlaneNamespace: "test-ns",
+				},
+			)
+
+			var err error
+			hc.kubeAPI, err = k8s.NewFakeAPI(tc.k8sConfigs...)
+			if err != nil {
+				t.Fatalf("Unexpected error: %s", err)
+			}
+
+			obs := newObserver()
+			hc.addCheckAsCategory("linkerd-existence", LinkerdControlPlaneExistenceChecks,
+				tc.checkDescription)
+			hc.RunChecks(obs.resultFn)
+			if !reflect.DeepEqual(obs.results, tc.expected) {
+				t.Fatalf("Expected results\n%s,\nbut got:\n%s", strings.Join(tc.expected, "\n"), strings.Join(obs.results, "\n"))
 			}
 		})
 	}
@@ -1323,6 +1366,7 @@ func TestValidateControlPlanePods(t *testing.T) {
 	t.Run("Returns an error if not all pods are running", func(t *testing.T) {
 		pods := []corev1.Pod{
 			pod("linkerd-grafana-5b7d796646-hh46d", corev1.PodRunning, true),
+			pod("linkerd-destination-9849948665-37082", corev1.PodFailed, true),
 			pod("linkerd-identity-6849948664-27982", corev1.PodFailed, true),
 		}
 
@@ -1330,7 +1374,7 @@ func TestValidateControlPlanePods(t *testing.T) {
 		if err == nil {
 			t.Fatal("Expected error, got nothing")
 		}
-		if err.Error() != "No running pods for \"linkerd-identity\"" {
+		if err.Error() != "No running pods for \"linkerd-destination\"" {
 			t.Fatalf("Unexpected error message: %s", err.Error())
 		}
 	})
@@ -1349,6 +1393,7 @@ func TestValidateControlPlanePods(t *testing.T) {
 
 	t.Run("Returns nil if all pods are running and all containers are ready", func(t *testing.T) {
 		pods := []corev1.Pod{
+			pod("linkerd-destination-9849948665-37082", corev1.PodRunning, true),
 			pod("linkerd-identity-6849948664-27982", corev1.PodRunning, true),
 			pod("linkerd-proxy-injector-5f79ff4844-", corev1.PodRunning, true),
 		}
@@ -1359,8 +1404,25 @@ func TestValidateControlPlanePods(t *testing.T) {
 		}
 	})
 
+	// This test is just for ensuring full coverage of the validateControlPlanePods function
+	t.Run("Returns an error if all the controller pods are not ready", func(t *testing.T) {
+		pods := []corev1.Pod{
+			pod("linkerd-destination-9849948665-37082", corev1.PodRunning, false),
+			pod("linkerd-identity-6849948664-27982", corev1.PodRunning, false),
+			pod("linkerd-proxy-injector-5f79ff4844-", corev1.PodRunning, false),
+		}
+
+		err := validateControlPlanePods(pods)
+		if err == nil {
+			t.Fatal("Expected error, got nothing")
+		}
+	})
+
 	t.Run("Returns nil if, HA mode, at least one pod of each control plane component is ready", func(t *testing.T) {
 		pods := []corev1.Pod{
+			pod("linkerd-destination-9843948665-48082", corev1.PodRunning, true),
+			pod("linkerd-destination-9843948665-48083", corev1.PodRunning, false),
+			pod("linkerd-destination-9843948665-48084", corev1.PodFailed, false),
 			pod("linkerd-identity-6849948664-27982", corev1.PodRunning, true),
 			pod("linkerd-identity-6849948664-27983", corev1.PodRunning, false),
 			pod("linkerd-identity-6849948664-27984", corev1.PodFailed, false),
@@ -1375,6 +1437,7 @@ func TestValidateControlPlanePods(t *testing.T) {
 
 	t.Run("Returns nil if all linkerd pods are running and pod list includes non-linkerd pod", func(t *testing.T) {
 		pods := []corev1.Pod{
+			pod("linkerd-destination-9843948665-48082", corev1.PodRunning, true),
 			pod("linkerd-identity-6849948664-27982", corev1.PodRunning, true),
 			pod("linkerd-proxy-injector-5f79ff4844-", corev1.PodRunning, true),
 			pod("hello-43c25d", corev1.PodRunning, true),
@@ -1645,6 +1708,67 @@ func TestValidateDataPlanePods(t *testing.T) {
 			t.Fatalf("Unexpected error: %s", err)
 		}
 	})
+
+	// This test relates to https://github.com/linkerd/linkerd2/issues/6128
+	t.Run("Returns nil if some pods are in the Succeeded phase and their proxies are no longer ready", func(t *testing.T) {
+		pods := []corev1.Pod{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "emoji-d9c7866bb-7v74n"},
+				Status: corev1.PodStatus{
+					Phase:  "Succeeded",
+					Reason: "Completed",
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name:  k8s.ProxyContainerName,
+							Ready: false,
+						},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "vote-bot-644b8cb6b4-g8nlr"},
+				Status: corev1.PodStatus{
+					Phase: "Running",
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name:  k8s.ProxyContainerName,
+							Ready: true,
+						},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "voting-65b9fffd77-rlwsd"},
+				Status: corev1.PodStatus{
+					Phase: "Running",
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name:  k8s.ProxyContainerName,
+							Ready: true,
+						},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "web-6cfbccc48-5g8px"},
+				Status: corev1.PodStatus{
+					Phase:  "Succeeded",
+					Reason: "Completed",
+					ContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name:  k8s.ProxyContainerName,
+							Ready: false,
+						},
+					},
+				},
+			},
+		}
+
+		err := validateDataPlanePods(pods, "emojivoto")
+		if err != nil {
+			t.Fatalf("Unexpected error: %s", err)
+		}
+	})
 }
 
 func TestDataPlanePodLabels(t *testing.T) {
@@ -1712,12 +1836,11 @@ func TestDataPlanePodLabels(t *testing.T) {
 			tc := tc //pin
 			t.Run(tc.description, func(t *testing.T) {
 				err := checkMisconfiguredPodsLabels(tc.pods)
-				fmt.Println(err.Error())
 
 				if err == nil {
 					t.Fatal("Expected error, got nothing")
 				}
-				fmt.Println(err.Error())
+
 				if err.Error() != tc.expectedErrorMsg {
 					t.Fatalf("Unexpected error message: %s", err.Error())
 				}
@@ -1865,7 +1988,6 @@ func TestLinkerdPreInstallGlobalResourcesChecks(t *testing.T) {
 			"pre-linkerd-global-resources no CustomResourceDefinitions exist",
 			"pre-linkerd-global-resources no MutatingWebhookConfigurations exist",
 			"pre-linkerd-global-resources no ValidatingWebhookConfigurations exist",
-			"pre-linkerd-global-resources no PodSecurityPolicies exist",
 		}
 		if !reflect.DeepEqual(observer.results, expected) {
 			testutil.AnnotatedErrorf(t, "Mismatch result", "Mismatch result.\nExpected: %v\n Actual: %v\n", expected, observer.results)
@@ -1904,12 +2026,6 @@ metadata:
   name: validating-webhook-configuration
   labels:
     linkerd.io/control-plane-ns: test-ns`,
-			`apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: pod-security-policy
-  labels:
-    linkerd.io/control-plane-ns: test-ns`,
 		}
 
 		var err error
@@ -1930,7 +2046,6 @@ metadata:
 			"pre-linkerd-global-resources no CustomResourceDefinitions exist: CustomResourceDefinitions found but should not exist: custom-resource-definition",
 			"pre-linkerd-global-resources no MutatingWebhookConfigurations exist: MutatingWebhookConfigurations found but should not exist: mutating-webhook-configuration",
 			"pre-linkerd-global-resources no ValidatingWebhookConfigurations exist: ValidatingWebhookConfigurations found but should not exist: validating-webhook-configuration",
-			"pre-linkerd-global-resources no PodSecurityPolicies exist: PodSecurityPolicies found but should not exist: pod-security-policy",
 		}
 		if !reflect.DeepEqual(observer.results, expected) {
 			t.Errorf("Mismatch result.\nExpected: %v\n Actual: %v\n", expected, observer.results)
@@ -2055,7 +2170,7 @@ data:
   global: |
     {"linkerdNamespace":"linkerd","cniEnabled":false,"version":"install-control-plane-version","identityContext":{"trustDomain":"cluster.local","trustAnchorsPem":"fake-trust-anchors-pem","issuanceLifetime":"86400s","clockSkewAllowance":"20s"}}
   proxy: |
-    {"proxyImage":{"imageName":"cr.l5d.io/linkerd/proxy","pullPolicy":"IfNotPresent"},"proxyInitImage":{"imageName":"cr.l5d.io/linkerd/proxy-init","pullPolicy":"IfNotPresent"},"controlPort":{"port":4190},"ignoreInboundPorts":[],"ignoreOutboundPorts":[],"inboundPort":{"port":4143},"adminPort":{"port":4191},"outboundPort":{"port":4140},"resource":{"requestCpu":"","requestMemory":"","limitCpu":"","limitMemory":""},"proxyUid":"2102","logLevel":{"level":"warn,linkerd=info"},"disableExternalProfiles":true,"proxyVersion":"install-proxy-version","proxy_init_image_version":"v1.3.12","debugImage":{"imageName":"cr.l5d.io/linkerd/debug","pullPolicy":"IfNotPresent"},"debugImageVersion":"install-debug-version"}
+    {"proxyImage":{"imageName":"cr.l5d.io/linkerd/proxy","pullPolicy":"IfNotPresent"},"proxyInitImage":{"imageName":"cr.l5d.io/linkerd/proxy-init","pullPolicy":"IfNotPresent"},"controlPort":{"port":4190},"ignoreInboundPorts":[],"ignoreOutboundPorts":[],"inboundPort":{"port":4143},"adminPort":{"port":4191},"outboundPort":{"port":4140},"resource":{"requestCpu":"","requestMemory":"","limitCpu":"","limitMemory":""},"proxyUid":"2102","logLevel":{"level":"warn,linkerd=info"},"disableExternalProfiles":true,"proxyVersion":"install-proxy-version","proxy_init_image_version":"v1.3.13","debugImage":{"imageName":"cr.l5d.io/linkerd/debug","pullPolicy":"IfNotPresent"},"debugImageVersion":"install-debug-version"}
   install: |
     {"cliVersion":"dev-undefined","flags":[]}`,
 			},
@@ -2101,7 +2216,7 @@ data:
 					},
 					DisableExternalProfiles: true,
 					ProxyVersion:            "install-proxy-version",
-					ProxyInitImageVersion:   "v1.3.12",
+					ProxyInitImageVersion:   "v1.3.13",
 					DebugImage: &configPb.Image{
 						ImageName:  "cr.l5d.io/linkerd/debug",
 						PullPolicy: "IfNotPresent",
@@ -2193,7 +2308,7 @@ data:
   global: |
     {"linkerdNamespace":"linkerd","cniEnabled":false,"version":"install-control-plane-version","identityContext":{"trustDomain":"cluster.local","trustAnchorsPem":"fake-trust-anchors-pem","issuanceLifetime":"86400s","clockSkewAllowance":"20s"}}
   proxy: |
-    {"proxyImage":{"imageName":"cr.l5d.io/linkerd/proxy","pullPolicy":"IfNotPresent"},"proxyInitImage":{"imageName":"cr.l5d.io/linkerd/proxy-init","pullPolicy":"IfNotPresent"},"controlPort":{"port":4190},"ignoreInboundPorts":[],"ignoreOutboundPorts":[],"inboundPort":{"port":4143},"adminPort":{"port":4191},"outboundPort":{"port":4140},"resource":{"requestCpu":"","requestMemory":"","limitCpu":"","limitMemory":""},"proxyUid":"2102","logLevel":{"level":"warn,linkerd=info"},"disableExternalProfiles":true,"proxyVersion":"install-proxy-version","proxy_init_image_version":"v1.3.12","debugImage":{"imageName":"cr.l5d.io/linkerd/debug","pullPolicy":"IfNotPresent"},"debugImageVersion":"install-debug-version"}
+    {"proxyImage":{"imageName":"cr.l5d.io/linkerd/proxy","pullPolicy":"IfNotPresent"},"proxyInitImage":{"imageName":"cr.l5d.io/linkerd/proxy-init","pullPolicy":"IfNotPresent"},"controlPort":{"port":4190},"ignoreInboundPorts":[],"ignoreOutboundPorts":[],"inboundPort":{"port":4143},"adminPort":{"port":4191},"outboundPort":{"port":4140},"resource":{"requestCpu":"","requestMemory":"","limitCpu":"","limitMemory":""},"proxyUid":"2102","logLevel":{"level":"warn,linkerd=info"},"disableExternalProfiles":true,"proxyVersion":"install-proxy-version","proxy_init_image_version":"v1.3.13","debugImage":{"imageName":"cr.l5d.io/linkerd/debug","pullPolicy":"IfNotPresent"},"debugImageVersion":"install-debug-version"}
   install: |
     {"cliVersion":"dev-undefined","flags":[]}
   values: |
@@ -2355,7 +2470,7 @@ data:
   global: |
     {"linkerdNamespace":"linkerd","cniEnabled":false,"version":"install-control-plane-version","identityContext":{"trustDomain":"cluster.local","trustAnchorsPem":"fake-trust-anchors-pem","issuanceLifetime":"86400s","clockSkewAllowance":"20s"}}
   proxy: |
-    {"proxyImage":{"imageName":"cr.l5d.io/linkerd/proxy","pullPolicy":"IfNotPresent"},"proxyInitImage":{"imageName":"cr.l5d.io/linkerd/proxy-init","pullPolicy":"IfNotPresent"},"controlPort":{"port":4190},"ignoreInboundPorts":[],"ignoreOutboundPorts":[],"inboundPort":{"port":4143},"adminPort":{"port":4191},"outboundPort":{"port":4140},"resource":{"requestCpu":"","requestMemory":"","limitCpu":"","limitMemory":""},"proxyUid":"2102","logLevel":{"level":"warn,linkerd=info"},"disableExternalProfiles":true,"proxyVersion":"install-proxy-version","proxy_init_image_version":"v1.3.12","debugImage":{"imageName":"cr.l5d.io/linkerd/debug","pullPolicy":"IfNotPresent"},"debugImageVersion":"install-debug-version"}
+    {"proxyImage":{"imageName":"cr.l5d.io/linkerd/proxy","pullPolicy":"IfNotPresent"},"proxyInitImage":{"imageName":"cr.l5d.io/linkerd/proxy-init","pullPolicy":"IfNotPresent"},"controlPort":{"port":4190},"ignoreInboundPorts":[],"ignoreOutboundPorts":[],"inboundPort":{"port":4143},"adminPort":{"port":4191},"outboundPort":{"port":4140},"resource":{"requestCpu":"","requestMemory":"","limitCpu":"","limitMemory":""},"proxyUid":"2102","logLevel":{"level":"warn,linkerd=info"},"disableExternalProfiles":true,"proxyVersion":"install-proxy-version","proxy_init_image_version":"v1.3.13","debugImage":{"imageName":"cr.l5d.io/linkerd/debug","pullPolicy":"IfNotPresent"},"debugImageVersion":"install-debug-version"}
   install: |
     {"cliVersion":"dev-undefined","flags":[]}
   values: |
@@ -2803,11 +2918,8 @@ func TestLinkerdIdentityCheckCertValidity(t *testing.T) {
 
 type fakeCniResourcesOpts struct {
 	hasConfigMap          bool
-	hasPodSecurityPolicy  bool
 	hasClusterRole        bool
 	hasClusterRoleBinding bool
-	hasRole               bool
-	hasRoleBinding        bool
 	hasServiceAccount     bool
 	hasDaemonSet          bool
 	scheduled             int
@@ -2828,32 +2940,6 @@ metadata:
     linkerd.io/cni-resource: "true"
 data:
   dest_cni_net_dir: "/etc/cni/net.d"
----
-`)
-	}
-
-	if opts.hasPodSecurityPolicy {
-		resources = append(resources, `
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: linkerd-test-ns-cni
-  labels:
-    linkerd.io/cni-resource: "true"
-spec:
-  allowPrivilegeEscalation: false
-  fsGroup:
-    rule: RunAsAny
-  hostNetwork: true
-  runAsUser:
-    rule: RunAsAny
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  volumes:
-  - hostPath
-  - secret
 ---
 `)
 	}
@@ -2885,46 +2971,6 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: linkerd-cni
-subjects:
-- kind: ServiceAccount
-  name: linkerd-cni
-  namespace: test-ns
----
-`)
-	}
-
-	if opts.hasRole {
-		resources = append(resources, `
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: linkerd-cni
-  namespace: test-ns
-  labels:
-    linkerd.io/cni-resource: "true"
-rules:
-- apiGroups: ['extensions', 'policy']
-  resources: ['podsecuritypolicies']
-  resourceNames:
-  - linkerd-test-ns-cni
-  verbs: ['use']
----
-`)
-	}
-
-	if opts.hasRoleBinding {
-		resources = append(resources, `
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: linkerd-cni
-  namespace: test-ns
-  labels:
-    linkerd.io/cni-resource: "true"
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
   name: linkerd-cni
 subjects:
 - kind: ServiceAccount
@@ -3038,87 +3084,48 @@ func TestCniChecks(t *testing.T) {
 			[]string{"linkerd-cni-plugin cni plugin ConfigMap exists: configmaps \"linkerd-cni-config\" not found"},
 		},
 		{
-			"fails when there is no pod security policy",
+			"fails then there is no ClusterRole",
 			fakeCniResourcesOpts{hasConfigMap: true},
 			[]string{
 				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists: missing PodSecurityPolicy: linkerd-test-ns-cni"},
-		},
-		{
-			"fails then there is no ClusterRole",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true},
-			[]string{
-				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
 				"linkerd-cni-plugin cni plugin ClusterRole exists: missing ClusterRole: linkerd-cni"},
 		},
 		{
 			"fails then there is no ClusterRoleBinding",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true},
+			fakeCniResourcesOpts{hasConfigMap: true, hasClusterRole: true},
 			[]string{
 				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
 				"linkerd-cni-plugin cni plugin ClusterRole exists",
 				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists: missing ClusterRoleBinding: linkerd-cni"},
 		},
 		{
-			"fails then there is no Role",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true, hasClusterRoleBinding: true},
-			[]string{
-				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
-				"linkerd-cni-plugin cni plugin ClusterRole exists",
-				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists",
-				"linkerd-cni-plugin cni plugin Role exists: missing Role: linkerd-cni"},
-		},
-		{
-			"fails then there is no RoleBinding",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true, hasClusterRoleBinding: true, hasRole: true},
-			[]string{
-				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
-				"linkerd-cni-plugin cni plugin ClusterRole exists",
-				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists",
-				"linkerd-cni-plugin cni plugin Role exists",
-				"linkerd-cni-plugin cni plugin RoleBinding exists: missing RoleBinding: linkerd-cni"},
-		},
-		{
 			"fails then there is no ServiceAccount",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true, hasClusterRoleBinding: true, hasRole: true, hasRoleBinding: true},
+			fakeCniResourcesOpts{hasConfigMap: true, hasClusterRole: true, hasClusterRoleBinding: true},
 			[]string{
 				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
 				"linkerd-cni-plugin cni plugin ClusterRole exists",
 				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists",
-				"linkerd-cni-plugin cni plugin Role exists",
-				"linkerd-cni-plugin cni plugin RoleBinding exists",
 				"linkerd-cni-plugin cni plugin ServiceAccount exists: missing ServiceAccount: linkerd-cni",
 			},
 		},
 		{
 			"fails then there is no DaemonSet",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true, hasClusterRoleBinding: true, hasRole: true, hasRoleBinding: true, hasServiceAccount: true},
+			fakeCniResourcesOpts{hasConfigMap: true, hasClusterRole: true, hasClusterRoleBinding: true, hasServiceAccount: true},
 			[]string{
 				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
 				"linkerd-cni-plugin cni plugin ClusterRole exists",
 				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists",
-				"linkerd-cni-plugin cni plugin Role exists",
-				"linkerd-cni-plugin cni plugin RoleBinding exists",
 				"linkerd-cni-plugin cni plugin ServiceAccount exists",
 				"linkerd-cni-plugin cni plugin DaemonSet exists: missing DaemonSet: linkerd-cni",
 			},
 		},
 		{
 			"fails then there is nodes are not ready",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true, hasClusterRoleBinding: true, hasRole: true, hasRoleBinding: true, hasServiceAccount: true, hasDaemonSet: true, scheduled: 5, ready: 4},
+			fakeCniResourcesOpts{hasConfigMap: true, hasClusterRole: true, hasClusterRoleBinding: true, hasServiceAccount: true, hasDaemonSet: true, scheduled: 5, ready: 4},
 			[]string{
 				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
 				"linkerd-cni-plugin cni plugin ClusterRole exists",
 				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists",
-				"linkerd-cni-plugin cni plugin Role exists",
-				"linkerd-cni-plugin cni plugin RoleBinding exists",
 				"linkerd-cni-plugin cni plugin ServiceAccount exists",
 				"linkerd-cni-plugin cni plugin DaemonSet exists",
 				"linkerd-cni-plugin cni plugin pod is running on all nodes: number ready: 4, number scheduled: 5",
@@ -3126,14 +3133,11 @@ func TestCniChecks(t *testing.T) {
 		},
 		{
 			"fails then there is nodes are not ready",
-			fakeCniResourcesOpts{hasConfigMap: true, hasPodSecurityPolicy: true, hasClusterRole: true, hasClusterRoleBinding: true, hasRole: true, hasRoleBinding: true, hasServiceAccount: true, hasDaemonSet: true, scheduled: 5, ready: 5},
+			fakeCniResourcesOpts{hasConfigMap: true, hasClusterRole: true, hasClusterRoleBinding: true, hasServiceAccount: true, hasDaemonSet: true, scheduled: 5, ready: 5},
 			[]string{
 				"linkerd-cni-plugin cni plugin ConfigMap exists",
-				"linkerd-cni-plugin cni plugin PodSecurityPolicy exists",
 				"linkerd-cni-plugin cni plugin ClusterRole exists",
 				"linkerd-cni-plugin cni plugin ClusterRoleBinding exists",
-				"linkerd-cni-plugin cni plugin Role exists",
-				"linkerd-cni-plugin cni plugin RoleBinding exists",
 				"linkerd-cni-plugin cni plugin ServiceAccount exists",
 				"linkerd-cni-plugin cni plugin DaemonSet exists",
 				"linkerd-cni-plugin cni plugin pod is running on all nodes",
@@ -3230,6 +3234,348 @@ func TestMinReplicaCheck(t *testing.T) {
 					t.Logf("Expected error: %s\n", tc.expected)
 					t.Logf("Received error: %s\n", err)
 					t.Fatal("test case failed")
+				}
+			}
+		})
+	}
+}
+
+func TestCheckOpaquePortAnnotations(t *testing.T) {
+	hc := NewHealthChecker(
+		[]CategoryID{LinkerdOpaquePortsDefinitionChecks},
+		&Options{
+			DataPlaneNamespace: "test-ns",
+		},
+	)
+
+	var err error
+
+	var testCases = []struct {
+		resources []string
+		expected  error
+	}{
+		{
+			resources: []string{`
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service-1
+  namespace: test-ns
+spec:
+  ports:
+    - name: elasticsearch
+      port: 9200
+      protocol: TCP
+      targetPort: 9200
+  selector:
+    service: service-1
+`,
+				`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-service-deployment
+  namespace: test-ns
+  labels:
+    service: service-1
+spec:
+  containers:
+    - name: test
+      image: "test-service"
+`,
+				`
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2021-06-08T08:38:16Z"
+  creationTimestamp: "2021-06-08T08:38:03Z"
+  labels:
+    service: test-service-1
+  name: test-service-1
+  namespace: test-ns
+subsets:
+- addresses:
+  - ip: 10.244.3.12
+    nodeName: nodename-1
+    targetRef:
+      kind: Pod
+      name: my-service-deployment
+      namespace: test-ns
+      resourceVersion: "20661"
+      uid: b37782aa-1458-4153-8399-dabc2b29aaae
+  ports:
+  - name: http-port
+    port: 8080
+    protocol: TCP
+`,
+			},
+			expected: nil,
+		},
+		{
+			resources: []string{`
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service-1
+  namespace: test-ns
+  annotations:
+    config.linkerd.io/opaque-ports: "9200"
+spec:
+  ports:
+    - name: elasticsearch
+      port: 9200
+      protocol: TCP
+      targetPort: 9200
+  selector:
+    service: service-1
+`,
+				`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-service-deployment
+  namespace: test-ns
+  service: service-1
+  labels:
+    service: service-1
+  annotations:
+    config.linkerd.io/opaque-ports: "9200"
+spec:
+  containers:
+    - name: test
+      image: "test-service"
+`,
+				`
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2021-06-08T08:38:16Z"
+  creationTimestamp: "2021-06-08T08:38:03Z"
+  labels:
+    service: test-service-1
+  name: test-service-1
+  namespace: test-ns
+subsets:
+- addresses:
+  - ip: 10.244.3.12
+    nodeName: nodename-1
+    targetRef:
+      kind: Pod
+      name: my-service-deployment
+      namespace: test-ns
+      resourceVersion: "20661"
+      uid: b37782aa-1458-4153-8399-dabc2b29aaae
+  ports:
+  - name: http-port
+    port: 8080
+    protocol: TCP			
+`,
+			},
+			expected: nil,
+		},
+		{
+			resources: []string{`
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service-1
+  namespace: test-ns
+spec:
+  ports:
+    - name: http
+      port: 9200
+      protocol: TCP
+      targetPort: 9200
+  selector:
+    service: service-1
+`,
+				`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-service-deployment
+  namespace: test-ns
+  service: service-1
+  labels:
+    service: service-1
+  annotations:
+    config.linkerd.io/opaque-ports: "9200"
+spec:
+  containers:
+    - name: test
+      image: "test-service"
+`,
+				`
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2021-06-08T08:38:16Z"
+  creationTimestamp: "2021-06-08T08:38:03Z"
+  labels:
+    service: test-service-1
+  name: test-service-1
+  namespace: test-ns
+subsets:
+- addresses:
+  - ip: 10.244.3.12
+    nodeName: nodename-1
+    targetRef:
+      kind: Pod
+      name: my-service-deployment
+      namespace: test-ns
+      resourceVersion: "20661"
+      uid: b37782aa-1458-4153-8399-dabc2b29aaae
+  ports:
+  - name: http-port
+    port: 8080
+    protocol: TCP
+`,
+			},
+			expected: fmt.Errorf("\t* pod/my-service-deployment has the annotation %s but service/test-service-1 doesn't", k8s.ProxyOpaquePortsAnnotation),
+		},
+		{
+			resources: []string{`
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service-1
+  namespace: test-ns
+  annotations:
+    config.linkerd.io/opaque-ports: "9200"
+spec:
+  ports:
+    - name: http
+      port: 9200
+      protocol: TCP
+      targetPort: 9200
+  selector:
+    service: service-1
+`,
+				`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-service-deployment
+  namespace: test-ns
+  service: service-1
+  labels:
+    service: service-1
+spec:
+  containers:
+    - name: test
+      image: "test-service"
+`,
+				`
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2021-06-08T08:38:16Z"
+  creationTimestamp: "2021-06-08T08:38:03Z"
+  labels:
+    service: test-service-1
+  name: test-service-1
+  namespace: test-ns
+subsets:
+- addresses:
+  - ip: 10.244.3.12
+    nodeName: nodename-1
+    targetRef:
+      kind: Pod
+      name: my-service-deployment
+      namespace: test-ns
+      resourceVersion: "20661"
+      uid: b37782aa-1458-4153-8399-dabc2b29aaae
+  ports:
+  - name: http-port
+    port: 8080
+    protocol: TCP		
+`,
+			},
+			expected: fmt.Errorf("\t* service/test-service-1 has the annotation %s but pod/my-service-deployment doesn't", k8s.ProxyOpaquePortsAnnotation),
+		},
+		{
+			resources: []string{`
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-service-1
+  namespace: test-ns
+  annotations:
+    config.linkerd.io/opaque-ports: "9200"
+spec:
+  ports:
+    - name: elasticsearch
+      port: 9200
+      protocol: TCP
+      targetPort: 9200
+  selector:
+    service: service-1
+`,
+				`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-service-deployment
+  namespace: test-ns
+  service: service-1
+  labels:
+    service: service-1
+  annotations:
+    config.linkerd.io/opaque-ports: "9300"
+spec:
+  containers:
+    - name: test
+      image: "test-service"
+`,
+				`
+apiVersion: v1
+kind: Endpoints
+metadata:
+  annotations:
+    endpoints.kubernetes.io/last-change-trigger-time: "2021-06-08T08:38:16Z"
+  creationTimestamp: "2021-06-08T08:38:03Z"
+  labels:
+    service: test-service-1
+  name: test-service-1
+  namespace: test-ns
+subsets:
+- addresses:
+  - ip: 10.244.3.12
+    nodeName: nodename-1
+    targetRef:
+      kind: Pod
+      name: my-service-deployment
+      namespace: test-ns
+      resourceVersion: "20661"
+      uid: b37782aa-1458-4153-8399-dabc2b29aaae
+  ports:
+  - name: http-port
+    port: 8080
+    protocol: TCP
+`,
+			},
+			expected: fmt.Errorf("\t* pod/my-service-deployment and service/test-service-1 have the annotation %s but values don't match", k8s.ProxyOpaquePortsAnnotation),
+		},
+	}
+
+	for i, tc := range testCases {
+		tc := tc //pin
+		t.Run(fmt.Sprintf("%d", i), func(t *testing.T) {
+			hc.kubeAPI, err = k8s.NewFakeAPI(tc.resources...)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			err = hc.checkMisconfiguredOpaquePortAnnotations(context.Background())
+			if err == nil && tc.expected != nil {
+				t.Fatalf("Expected check to fail with %s", tc.expected.Error())
+			}
+			if err != nil && tc.expected != nil {
+				if err.Error() != tc.expected.Error() {
+					t.Fatalf("Expected error: %s, received: %s", tc.expected, err)
 				}
 			}
 		})

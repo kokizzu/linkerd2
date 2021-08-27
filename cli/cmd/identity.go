@@ -47,16 +47,38 @@ func newCmdIdentity() *cobra.Command {
 		Use:   "identity [flags] (PODS)",
 		Short: "Display the certificate(s) of one or more selected pod(s)",
 		Long: `Display the certificate(s) of one or more selected pod(s).
-		
+
 This command initiates a port-forward to a given pod or a set of pods and fetches the TLS certificate.
 		`,
-		Example: ` 
+		Example: `
  # Get certificate from pod foo-bar in the default namespace.
  linkerd identity foo-bar
-		
+
  # Get certificate from all pods with the label name=nginx
  linkerd identity -l name=nginx
 		`,
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			k8sAPI, err := k8s.NewAPI(kubeconfigPath, kubeContext, impersonate, impersonateGroup, 0)
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+
+			if options.namespace == "" {
+				options.namespace = pkgcmd.GetDefaultNamespace(kubeconfigPath, kubeContext)
+			}
+
+			cc := k8s.NewCommandCompletion(k8sAPI, options.namespace)
+
+			// insert pod resource type as first argument to suggest
+			// pod resources only
+			args = append([]string{k8s.Pod}, args...)
+			results, err := cc.Complete(args, toComplete)
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveError
+			}
+
+			return results, cobra.ShellCompDirectiveDefault
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if options.namespace == "" {
 				options.namespace = pkgcmd.GetDefaultNamespace(kubeconfigPath, kubeContext)
@@ -104,6 +126,10 @@ This command initiates a port-forward to a given pod or a set of pods and fetche
 
 	cmd.PersistentFlags().StringVarP(&options.namespace, "namespace", "n", options.namespace, "Namespace of the pod")
 	cmd.PersistentFlags().StringVarP(&options.selector, "selector", "l", options.selector, "Selector (label query) to filter on, supports ‘=’, ‘==’, and ‘!=’ ")
+
+	pkgcmd.ConfigureNamespaceFlagCompletion(cmd, []string{"namespace"},
+		kubeconfigPath, impersonate, impersonateGroup, kubeContext)
+
 	return cmd
 }
 
@@ -165,7 +191,7 @@ func getContainerCertificate(k8sAPI *k8s.KubernetesAPI, pod corev1.Pod, containe
 }
 
 func getCertResponse(url string, pod corev1.Pod) ([]*x509.Certificate, error) {
-	serverName, err := getServerName(pod, k8s.ProxyContainerName)
+	serverName, err := k8s.PodIdentity(&pod)
 	if err != nil {
 		return nil, err
 	}
@@ -181,32 +207,6 @@ func getCertResponse(url string, pod corev1.Pod) ([]*x509.Certificate, error) {
 
 	cert := conn.ConnectionState().PeerCertificates
 	return cert, nil
-}
-
-func getServerName(pod corev1.Pod, containerName string) (string, error) {
-	if pod.Status.Phase != corev1.PodRunning {
-		return "", fmt.Errorf("pod not running: %s", pod.GetName())
-	}
-
-	var l5dns string
-	var l5dtrustdomain string
-	podsa := pod.Spec.ServiceAccountName
-	podns := pod.ObjectMeta.Namespace
-	for _, c := range pod.Spec.Containers {
-		if c.Name == containerName {
-			for _, env := range c.Env {
-				if env.Name == "_l5d_ns" {
-					l5dns = env.Value
-				}
-				if env.Name == "_l5d_trustdomain" {
-					l5dtrustdomain = env.Value
-				}
-			}
-		}
-	}
-
-	serverName := fmt.Sprintf("%s.%s.serviceaccount.identity.%s.%s", podsa, podns, l5dns, l5dtrustdomain)
-	return serverName, nil
 }
 
 func getPods(ctx context.Context, clientset kubernetes.Interface, namespace string, selector string, args []string) ([]corev1.Pod, error) {

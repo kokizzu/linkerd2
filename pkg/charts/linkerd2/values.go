@@ -60,12 +60,14 @@ type (
 		PodAnnotations map[string]string `json:"podAnnotations"`
 		PodLabels      map[string]string `json:"podLabels"`
 
+		PolicyController *PolicyController `json:"policyController"`
 		Proxy            *Proxy            `json:"proxy"`
 		ProxyInit        *ProxyInit        `json:"proxyInit"`
 		Identity         *Identity         `json:"identity"`
 		DebugContainer   *DebugContainer   `json:"debugContainer"`
-		ProxyInjector    *ProxyInjector    `json:"proxyInjector"`
-		ProfileValidator *ProfileValidator `json:"profileValidator"`
+		ProxyInjector    *Webhook          `json:"proxyInjector"`
+		ProfileValidator *Webhook          `json:"profileValidator"`
+		PolicyValidator  *Webhook          `json:"policyValidator"`
 		NodeSelector     map[string]string `json:"nodeSelector"`
 		Tolerations      []interface{}     `json:"tolerations"`
 		Stage            string            `json:"stage"`
@@ -107,8 +109,10 @@ type (
 		RequireIdentityOnInboundPorts string           `json:"requireIdentityOnInboundPorts"`
 		OutboundConnectTimeout        string           `json:"outboundConnectTimeout"`
 		InboundConnectTimeout         string           `json:"inboundConnectTimeout"`
+		PodInboundPorts               string           `json:"podInboundPorts"`
 		OpaquePorts                   string           `json:"opaquePorts"`
 		Await                         bool             `json:"await"`
+		DefaultInboundPolicy          string           `json:"defaultInboundPolicy"`
 	}
 
 	// ProxyInit contains the fields to set the proxy-init container
@@ -126,6 +130,14 @@ type (
 	// DebugContainer contains the fields to set the debugging sidecar
 	DebugContainer struct {
 		Image *Image `json:"image"`
+	}
+
+	// PolicyController contains the fields to configure the policy controller container
+	PolicyController struct {
+		Image              *Image     `json:"image"`
+		Resources          *Resources `json:"resources"`
+		LogLevel           string     `json:"logLevel"`
+		DefaultAllowPolicy string     `json:"defaultAllowPolicy"`
 	}
 
 	// Image contains the details to define a container image
@@ -177,6 +189,7 @@ type (
 
 	// Issuer has the Helm variables of the identity issuer
 	Issuer struct {
+		ExternalCA         bool       `json:"externalCA"`
 		Scheme             string     `json:"scheme"`
 		ClockSkewAllowance string     `json:"clockSkewAllowance"`
 		IssuanceLifetime   string     `json:"issuanceLifetime"`
@@ -184,14 +197,8 @@ type (
 		TLS                *IssuerTLS `json:"tls"`
 	}
 
-	// ProxyInjector has all the proxy injector's Helm variables
-	ProxyInjector struct {
-		*TLS
-		NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector"`
-	}
-
-	// ProfileValidator has all the profile validator's Helm variables
-	ProfileValidator struct {
+	// Webhook Helm variables for a webhook
+	Webhook struct {
 		*TLS
 		NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector"`
 	}
@@ -275,7 +282,7 @@ func readDefaults(ha bool) (*Values, error) {
 
 // Merge merges the non-empty properties of src into v.
 // A new Values instance is returned. Neither src nor v are mutated after
-// calling merge.
+// calling Merge.
 func (v Values) Merge(src Values) (Values, error) {
 	// By default, mergo.Merge doesn't overwrite any existing non-empty values
 	// in its first argument. So in HA mode, we are merging values.yaml into

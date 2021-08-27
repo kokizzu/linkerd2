@@ -212,6 +212,22 @@ func TestUpgradeOverwriteIssuer(t *testing.T) {
 				}
 				continue
 			}
+
+			if id == "ConfigMap/linkerd-identity-trust-roots" {
+				if pathMatch(diff.path, []string{"data", "ca-bundle.crt"}) {
+					ca, err := base64.StdEncoding.DecodeString(issuerCerts.ca)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if diff.b.(string) != string(ca) {
+						diff.a = string(ca)
+						t.Errorf("Unexpected diff in %s:\n%s", id, diff.String())
+					}
+				} else {
+					t.Errorf("Unexpected diff in %s:\n%s", id, diff.String())
+				}
+				continue
+			}
 			t.Errorf("Unexpected diff in %s:\n%s", id, diff.String())
 		}
 	}
@@ -325,6 +341,7 @@ func replaceK8sSecrets(input string) string {
 	manifest = strings.ReplaceAll(manifest, "linkerd-proxy-injector-k8s-tls", "linkerd-proxy-injector-tls")
 	manifest = strings.ReplaceAll(manifest, "linkerd-tap-k8s-tls", "linkerd-tap-tls")
 	manifest = strings.ReplaceAll(manifest, "linkerd-sp-validator-k8s-tls", "linkerd-sp-validator-tls")
+	manifest = strings.ReplaceAll(manifest, "linkerd-policy-validator-k8s-tls", "linkerd-policy-validator-tls")
 	return manifest
 }
 
@@ -554,7 +571,7 @@ func renderInstall(t *testing.T, values *linkerd2.Values) bytes.Buffer {
 func renderUpgrade(installManifest string, upgradeOpts []flag.Flag) (bytes.Buffer, error) {
 	k, err := k8s.NewFakeAPIFromManifests([]io.Reader{strings.NewReader(installManifest)})
 	if err != nil {
-		return bytes.Buffer{}, err
+		return bytes.Buffer{}, fmt.Errorf("failed to initialize fake API: %w\n\n%s", err, installManifest)
 	}
 
 	return upgrade(context.Background(), k, upgradeOpts, "", valuespkg.Options{})
@@ -563,7 +580,7 @@ func renderUpgrade(installManifest string, upgradeOpts []flag.Flag) (bytes.Buffe
 func renderInstallAndUpgrade(t *testing.T, installOpts *charts.Values, upgradeOpts []flag.Flag) (bytes.Buffer, bytes.Buffer, error) {
 	err := validateValues(context.Background(), nil, installOpts)
 	if err != nil {
-		return bytes.Buffer{}, bytes.Buffer{}, err
+		return bytes.Buffer{}, bytes.Buffer{}, fmt.Errorf("failed to validate values: %w", err)
 	}
 	installBuf := renderInstall(t, installOpts)
 	upgradeBuf, err := renderUpgrade(installBuf.String(), upgradeOpts)
@@ -596,7 +613,7 @@ func ignorableDiff(id string, diff diff) bool {
 		return true
 	}
 
-	if (id == "Deployment/linkerd-sp-validator" || id == "Deployment/linkerd-proxy-injector" || id == "Deployment/linkerd-tap") &&
+	if (id == "Deployment/linkerd-sp-validator" || id == "Deployment/linkerd-proxy-injector" || id == "Deployment/linkerd-tap" || id == "Deployment/linkerd-destination") &&
 		pathMatch(diff.path, []string{"spec", "template", "metadata", "annotations", "checksum/config"}) {
 		// APIService TLS chains are regenerated upon upgrade so we expect the
 		// caBundle to change.
@@ -605,7 +622,8 @@ func ignorableDiff(id string, diff diff) bool {
 
 	if id == "Secret/linkerd-proxy-injector-tls" || id == "Secret/linkerd-sp-validator-tls" ||
 		id == "Secret/linkerd-tap-tls" || id == "Secret/linkerd-sp-validator-k8s-tls" ||
-		id == "Secret/linkerd-proxy-injector-k8s-tls" || id == "Secret/linkerd-tap-k8s-tls" {
+		id == "Secret/linkerd-proxy-injector-k8s-tls" || id == "Secret/linkerd-tap-k8s-tls" ||
+		id == "Secret/linkerd-policy-validator-tls" || id == "Secret/linkerd-policy-validator-k8s-tls" {
 		// Webhook and APIService TLS chains are regenerated upon upgrade.
 		return true
 	}

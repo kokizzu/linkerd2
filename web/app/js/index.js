@@ -3,14 +3,17 @@ import '../img/favicon.png'; // needs to be referenced somewhere so webpack bund
 
 import { BrowserRouter, Redirect, Route, Switch } from 'react-router-dom';
 import { DETECTORS, LocaleResolver, TRANSFORMERS } from 'locales-detector';
-import { MuiThemeProvider, createMuiTheme } from '@material-ui/core/styles';
+import { MuiThemeProvider, createTheme } from '@material-ui/core/styles';
 
 import ApiHelpers from './components/util/ApiHelpers.jsx';
 import AppContext from './components/util/AppContext.jsx';
 import Community from './components/Community.jsx';
 import CssBaseline from '@material-ui/core/CssBaseline';
+import Extensions from './components/Extensions.jsx';
 import Gateway from './components/Gateway.jsx';
 import { I18nProvider } from '@lingui/react';
+import { i18n } from '@lingui/core';
+import { en, es } from 'make-plural/plurals';
 import Namespace from './components/Namespace.jsx';
 import Navigation from './components/Navigation.jsx';
 import NoMatch from './components/NoMatch.jsx';
@@ -55,10 +58,23 @@ const detectedLocales = new LocaleResolver(
   [new DETECTORS.NavigatorDetector()],
   [new TRANSFORMERS.FallbacksTransformer()],
 ).getLocales();
-const catalogOptions = { en: catalogEn, es: catalogEs };
+const langOptions = {
+  en: {
+    catalog: catalogEn,
+    plurals: en,
+  },
+  es: {
+    catalog: catalogEs,
+    plurals: es,
+  },
+};
 const selectedLocale =
-    _find(detectedLocales, l => !_isEmpty(catalogOptions[l])) || 'en';
-const selectedCatalog = catalogOptions[selectedLocale] || catalogEn;
+    _find(detectedLocales, l => !_isEmpty(langOptions[l])) || 'en';
+const selectedLangOptions = langOptions[selectedLocale] || langOptions.en;
+
+i18n.loadLocaleData(selectedLocale, { plurals: selectedLangOptions.plurals });
+i18n.load(selectedLocale, selectedLangOptions.catalog.messages);
+i18n.activate(selectedLocale);
 
 class App extends React.Component {
   constructor(props) {
@@ -89,9 +105,7 @@ class App extends React.Component {
   render() {
     return (
       <AppContext.Provider value={this.state}>
-        <I18nProvider
-          language={selectedLocale}
-          catalogs={{ [selectedLocale]: selectedCatalog }}>
+        <I18nProvider i18n={i18n}>
           <AppHTML />
         </I18nProvider>
       </AppContext.Provider>
@@ -100,7 +114,7 @@ class App extends React.Component {
 }
 
 function AppHTML() {
-  const theme = createMuiTheme(dashboardTheme);
+  const theme = createTheme(dashboardTheme);
 
   return (
     <React.Fragment>
@@ -198,6 +212,9 @@ function AppHTML() {
               <Route
                 path={`${pathPrefix}/community`}
                 render={props => <Navigation {...props} ChildComponent={Community} />} />
+              <Route
+                path={`${pathPrefix}/extensions`}
+                render={props => <Navigation {...props} ChildComponent={Extensions} />} />
               <Route component={NoMatch} />
             </Switch>
           </QueryParamProvider>

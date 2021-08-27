@@ -29,7 +29,7 @@ func NewCommandCompletion(
 }
 
 // Complete accepts a list of arguments and a substring to generate CLI suggestions.
-// `args` represent a list of arguments a user has already enterd in the CLI. These
+// `args` represent a list of arguments a user has already entered in the CLI. These
 // arguments are used for determining what resource type we'd like to receive
 // suggestions for as well as a list of resources names that have already provided.
 // `toComplete` represents the string prefix of a resource name that we'd like to
@@ -48,16 +48,22 @@ func (c *CommandCompletion) Complete(args []string, toComplete string) ([]string
 
 	suggestions := []string{}
 	if len(args) == 0 && toComplete == "" {
-		return StatAllResourceTypes, nil
+		return CompletionResourceTypes, nil
 	}
 
 	if len(args) == 0 && toComplete != "" {
-		for _, t := range StatAllResourceTypes {
+		for _, t := range CompletionResourceTypes {
 			if strings.HasPrefix(t, toComplete) {
 				suggestions = append(suggestions, t)
 			}
 		}
 		return suggestions, nil
+	}
+
+	// Similar to kubectl, we don't provide resource completion
+	// when the resource provided is in format <kind>/<resourceName>
+	if strings.Contains(args[0], "/") {
+		return []string{}, nil
 	}
 
 	resType, err := CanonicalResourceNameFromFriendlyName(args[0])
@@ -68,13 +74,6 @@ func (c *CommandCompletion) Complete(args []string, toComplete string) ([]string
 	// if we are looking for namespace suggestions clear namespace selector
 	if resType == "namespace" {
 		c.namespace = ""
-	}
-
-	// Similar to kubectl's completion for bash and zsh only, we don't provide
-	// resource completion when the resource provided is in format
-	// <kind>/<resourceName>.
-	if strings.Contains(args[0], "/") {
-		return []string{}, nil
 	}
 
 	gvr, err := c.getGroupVersionKindForResource(resType)

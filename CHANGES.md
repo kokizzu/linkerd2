@@ -1,5 +1,302 @@
 # Changes
 
+## edge-21.8.4
+
+This edge release continues to build on the policy feature by adding support for
+cluster-scoped default policies and exposing policy labels on various prometheus
+metrics. The proxy has been updated to return HTTP-level authorization errors
+at the time that the request is processed, instead of when the connection is
+established.
+
+In addition, the proxy-injector has been updated to set the `opaque-ports`
+annotation on a workload to make sure that controllers can discover how the
+workload was configured. Also, the `sleep` binary has been added to the proxy
+image in order to restore the functionality required for `waitBeforeExitSeconds`
+to work.
+
+* Added `default-inbound-policy` annotation to the proxy-injector
+* Updated the proxy-injector to always add the `opaque-ports` annotation
+* Added `sleep` binary to proxy image
+* Updated inbound traffic metrics to include server and authorization labels
+* Updated the policy-controller to honor pod level port annotations when a
+  `Server` resource definition does not match the ports defined for the workload
+* Updated the point at which the proxy returns HTTP-level authorization errors
+* Exposed permit and policy labels on HTTP metrics
+* Added support for cluster-scoped default policies
+* Dropped `nonroot` variant from the policy-controller's distroless base image
+  to avoid erroring in some environments.
+
+## edge-21.8.3
+
+This release adds support for dynamic inbound policies. The proxy now discovers
+policies from the policy-controller API for all application ports documented in a
+pod spec. Rejected connections are logged. Policies are not yet reflected in the
+proxy's metrics.
+
+These policies also allow the proxy to skip protocol detection when a server is
+explicitly annotated as HTTP/2 or when the server is documented to be opaque or
+application-terminated TLS.
+
+* Added a new section to linkerd-viz's dashboard that lists installed extensions
+  (thanks @sannimichaelse!)
+* Added the `enableHeadlessServices` Helm flag to the `linkerd multicluster
+  link` command for enabling headless service mirroring (thanks @knutgoetz!)
+* Removed some unused and duplicate constants in the codebase (thanks
+  @xichengliudui!)
+* Added support for exposing service metadata from exported to mirrored services
+  in multicluster installations (thanks @importhuman!)
+* Fixed an issue where the policy controller's liveness checks would fail after
+  the controller was disconnected but had successfully resumed its watches
+* Fixed the `linkerd-policy` service selector to properly select `destination`
+  control plane components
+* Added additional environment variables to the proxy container to allow support
+  for dynamic policy configuration
+
+## edge-21.8.2
+
+This edge release continues the policy work by adding a new controller, written
+in Rust, to expose a discovery API for inbound server policies. Apart from
+that, this release includes a number of changes from external contributors; the
+`linkerd-jaeger` helm chart now supports passing arguments to the Jaeger
+container through the chart's values file. A number of unused functions and
+variables have been also removed to improve the quality of the codebase.
+Finally, this release also comes with changes to the proxy's outbound behavior,
+a new extensions page on the dashboard, and support for querying service
+metrics using the `authority` label in `linkerd viz stat`.
+
+* Introduced new `linkerd-policy-controller`; the new controller is written in
+  Rust and implements discovery APIs for inbound server policies, the container
+  has been added to the `linkerd-destination` pod
+* Updated `linkerd-jaeger` helm chart to support passing arguments to the
+  Jaeger container (thanks @bsord!)
+* Added support for querying service metrics using the `authority` label in
+  `linkerd viz stat`
+* Improved code hygiene by removing unused constants and functions throughout
+  the codebase (thanks @xichengliudui!)
+* Added a new extensions page to the dashboard to list all known built-in and
+  third party extensions that can be used with Linkerd
+* Changed outbound behavior in the proxy to tear down server-side connections
+  when the remote proxy returns responses that indicate proxy errors; the
+  connection in this case will be reset to allow clients to connect to a new
+  endpoint
+
+## edge-21.8.1
+
+This releases includes initial changes w.r.t addition of Authorization into
+Linkerd. It includes adding the new `policy.linkerd.io` CRDs to the core install.
+This also includes numerous dependency updates both in the web and dashboard.
+
+* Added `servers.policy.linkerd.io` and `serverauthorizations.policy.linkerd.io`
+  CRDs into the default Linkerd installation to support configuration and
+  discovery of inbound policies
+* Modified the proxy to support upcoming policy features
+* Updated several dashboard dependencies to latest versions
+* Updated several proxy dependencies to latest versions
+
+## edge-21.7.5
+
+This release updates Linkerd to store the identity trust root in a ConfigMap to
+make it easier to manage and rotate the trust root.  The release also lays the
+groundwork for StatefulSet support in the multicluster extension and removes
+deprecated PSP resources by default.
+
+* Added a `linkerd-identity-trust-roots` ConfigMap which contains the configured
+  trust root bundle
+* Introduced support for StatefulSets across multicluster (disabled by default)
+* Stopped installing PSP resources by default since these are deprecated as
+  of Kubernetes v1.21
+
+## edge-21.7.4
+
+This release continues to focus on dependency updates. It also adds the
+`l5d-proxy-error` information header to distinguish proxy generated errors
+proxy generated errors from application generated errors.
+
+* Updated several project dependencies
+* Added a new `l5d-proxy-error` on responses that allows proxy-generated error
+  responses to be distinguished from application-generated error responses.
+* Removed support for configuring HTTP/2 keepalives via the proxy.
+  Configuring this setting would sometimes cause conflicts with Go gRPC servers
+  and clients
+* Added a new `target_addr` label to `*_tcp_accept_errors` metrics to improve
+  diagnostics, especially for TLS detection timeouts
+
+## edge-21.7.3
+
+This edge release introduces several changes around metrics. ReplicaSets are now
+a supported resource and metrics can be associated with them. A new metric has
+been added which counts proxy errors encountered before a protocol can be
+detected. Finally, the request errors metric has been split into separate
+inbound and outbound directions.
+
+* Fixed printing `check --pre` command usage if it fails after being unable to
+  connect to Kubernetes (thanks @rdileep13!)
+* Updated the default skip and opaque ports to match that which is listed in the
+  [documentation](https://linkerd.io/2.10/features/protocol-detection/#configuring-protocol-detection)
+* Added the `LINKERD2_PROXY_INBOUND_PORTS` environment variable during proxy
+  injection which will be used by ongoing policy changes
+* Added client-go cache size metrics to the `diagnostics controller-metrics`
+  command
+* Added validation that the certificate provided by an external issuer is a CA
+  (thanks @rumanzo!)
+* Added metrics support for ReplicaSets
+* Replaced the `request_errors_total` metric with two new metrics:
+  `inbound_http_errors_total` and `outbound_http_errors_total`
+* Introduced the `inbound_tcp_accept_errors_total` and
+  `outbound_tcp_accept_errors_total` metrics which count proxy errors
+  encountered before a protocol can be detected
+
+## edge-21.7.2
+
+This edge release focuses on dependency updates and has a couple of functional
+changes. First, the Dockerfile used to build the proxy has been updated to use
+the default `distroless` image, rather than the non-root variant. This change
+is safe because the proxy already runs as non-root within the container. Second,
+the `ignoreInboundPorts` parameter has been added in the linkerd2-cni helm
+charts in order to enable tap support.
+
+* Updated several project dependencies
+* Updated the Dockerfile-proxy to use the default distroless image, because
+  the proxy already runs as non-root within the container
+* Added `ignoreInboundPorts` parameter to the linkerd2-cni plugin helm chart
+
+## edge-21.7.1
+
+This edge release adds support for emitting Kubernetes events in the identity
+controller when issuing leaf certificates. The event includes the identity,
+expiry date, and a hash of the certificate. Additionally, this release contains
+many dependency updates for the control plane's components, and it includes a
+fix for an issue with the clusterNetworks healthcheck.
+
+* Updated the identity controller to emit Kubernetes events when successfully
+  issuing leaf certificates to injected pods.
+* Fixed an issue in `linkerd check` where the clusterNetworks healthcheck
+  would fail if the `podCIDR` field is omitted from a node's spec.
+* Removed unnecessary controller port-forward logic from the `bin/web` script.
+
+## edge-21.6.5
+
+This release contains a few improvements, from many contributors!  Also under
+the hood, the destination service has received updates in preparation to the
+upcoming support for StatefulSets across multicluster.
+
+* Improved the `linkerd check --proxy` command to avoid hitting a timeout when
+  dealing with large clusters
+* Fixed the web component permissions in order to properly run the podCIDR check
+  (thanks @aryan9600!)
+* Avoid having the proxy-init container fail when the main container is
+  configured to drop either the NET_RAW or NET_ADMIN capabilities (thanks
+  @aryan9600!)
+* Upgraded the proxy-init image to improve the output in "simulate" mode (thanks
+  @liuerfire!) and to log to stdout instead of stderr (thanks @mo4islona!)
+* Added test-coverage reports to PRs (thanks @akshitgrover!)
+
+## edge-21.6.3
+
+This release moves the Linkerd proxy to a more minimal Docker base image,
+adds a check for detecting certain network misconfigurations, and replaces
+the deprecated OpenCensus collector with the OpenTelemetry collector in the
+jaeger extension.
+
+* Switched the Linkerd proxy's base docker image from Debian to a minimal
+  distroless base image (thanks @tskinn!)
+* Added a check to verify that Linkerd's clusterNetworks settings match the
+  cluster's pod CIDR networks (thanks @aryan9600!)
+* Replaced the deprecated OpenCensus collector with the OpenTelemetry
+  collector in the jaeger extension (thanks @aatarasoff!)
+
+## edge-21.6.2
+
+This release fixes a problem with the HTTP body buffering that was added
+to support gRPC retries. Now, only requests with a retry configuration
+are buffered (and only when their bodies are less than 64KB).
+
+Additionally, an issue with the outbound ingress-mode proxy where forwarded
+HTTP clients could fail to detect when the target pod was deleted, causing
+connections to retry forever has been fixed. This only impacted traffic
+forwarded directly to pod IPs and not load balanced services.
+
+Finally, this release also includes some fixes in the CLI and dashboard.
+
+* Added a new check that verifies if the opaque ports annotation is
+  misconfigured on services or pods (thanks @migue!)
+* Added support for resource aware completion for core linkerd command
+* Fixed an issue where `namespace` resource was erroneously being shown
+  in the dashboard's topology graph
+* Added uninstall command support for legacy extension installs
+* Updated the proxy to only buffer request bodies when a request can be retried
+* Updated the proxy to prevent buffering indefinitely on requests
+  when endpoints are updated in ingress mode
+* Fixed spelling mistakes across various files in the project
+  (thanks @jsoref!)
+
+## edge-21.6.1
+
+This release adds support for retrying HTTP/2 requests with small (<64KB)
+message bodies, allowing the proxy to properly buffer message bodies when
+responses are classified as a failure. Documentation on how to configure
+retries can be found [here](https://linkerd.io/2.10/tasks/configuring-retries/).
+
+This release also modifies the proxy's identity subsystem to instantiate a
+client on-demand so client connections are not retained continually. Also
+included in this release are various bug fixes and improvements as well as
+expanding support for resource-aware tab completion in the jaeger and
+multicluster CLI extensions.
+
+* Added support for specifying a `gateway-port` flag for the `multicluster link`
+  command (thanks @psmit!)
+* Added support for Kubernetes resource aware tab completion for `jaeger` and
+  `multicluster` commands
+* Fixed an issue where `viz`, `jaeger` and `multicluster` extensions could not
+  be installed on `PodSecurityPolicy`-enabled clusters
+* Fixed an issue where `linkerd check --proxy` could incorrectly report
+  out-of-date proxy versions caused by incorrect regex (thanks @aryan9600!)
+* Added support for the proxy to retry HTTP/2 requests with message bodies
+  <= 64KB
+* Modified the proxy's controller stack to create new client connections
+  on-demand
+* Fixed Viz's `uninstall` command to remove viz installations that used the
+  legacy `linkerd.io/extension: linkerd-viz` label (thanks @jsoref!)
+* Expanded the "linkerd-existence" health check to also check for the
+  destination pod readiness
+
+## edge-21.5.3
+
+This edge release contains various improvements to the Viz and Jaeger install
+charts, along with bug fixes in the CLI, and destination. This release also
+adds kubernetes aware autocompletion to all viz commands, along with
+ServiceProfiles to be part of the default `viz install`.
+
+Finally, the proxy has been updated to continue supporting requests without
+`l5d-dst-override` in ingress-mode proxies, to no longer include query parameters
+in the OpenCensus trace spans, and to prevent timeouts with controller clients
+of components with more than one replica.
+
+* Separated protocol hint setting from H2 upgrades in destination profile
+  response, thus preventing `hint.OpaqueTransport` field from not being set when
+  H2 upgrades are disabled
+* Updated OpenCensus trace spans for HTTP requests to no longer include query
+  parameters (thanks @aatarasoff!)
+* Reverted [linkerd/linkerd2-proxy#992](https://github.com/linkerd/linkerd2-proxy/pull/992)
+  to support requests without `l5d-dst-override` in ingress-mode proxies
+* Fixed an issue in the proxy to prevent timeouts with controller clients
+  of components with more than one replica
+* Fixed `linkerd check --proxy` failure with pods that are part of Jobs
+* Updated `viz install` to also include ServiceProfiles of its components.
+  As a side-effect, `linkerd diagnostics install-sp` cmd has been removed
+* Added support for Kubernetes resource aware tab completion for all
+  viz commands
+* Updated destination to prefer `ServiceProfile.dstOverrides` over
+  `TrafficSplit` when both are present for a service
+* Added toggle flags for `collector` and `jaeger` components in the
+  jaeger extension (thanks @tarvip!)
+* Added support for setting `nodeselector`, `toleration` fields for components
+  in the Viz extension (thanks @aatarasoff!)
+* Fixed a templating issue in Viz, making `podAnnotations` field
+  work with prometheus
+* Updated Golang version to 1.16.4
+* Removed unnecessary `--addon-overwrite` flag in `linkerd upgrade`
+
 ## edge-21.5.2
 
 This edge release updates the proxy-init container to check whether the iptables
@@ -193,7 +490,7 @@ if you are upgrading from `2.9.x` or below versions.
     longer draggable.
   * Updated dashboard build to use webpack v5
   * Added CA certs to the Viz extension's metrics-api container so
-    that it can validate the certifcate of an external Prometheus
+    that it can validate the certificate of an external Prometheus
   * Removed components from the control plane dashboard that now
     are part of the Viz extension
   * Changed web's base image from debian to scratch
@@ -253,13 +550,13 @@ Thanks to all our 2.10 users who helped discover these issues!
 * Modified the proxy-injector to add the opaque ports annotation to pods if
   their namespace has it set
 * Added CA certs to the Viz extension's `metrics-api` container so that it can
-  validate the certifcate of an external Prometheus
+  validate the certificate of an external Prometheus
 * Fixed an issue where inbound TLS detection from non-meshed workloads could
   break
 * Fixed an issue where the admin server's HTTP detection would fail and not
   recover; these are now handled gracefully and without logging warnings
 * Aligned the Helm installation heartbeat schedule to match that of the CLI
-* Fixed an issue with Multicluster's serivce mirror where it's endpoint repair
+* Fixed an issue with Multicluster's service mirror where it's endpoint repair
   retries were not properly rate limited
 * Removed components from the control plane dashboard that now are part of the
   Viz extension
@@ -637,7 +934,7 @@ the robustness of the opaque transport.
 * Changed opaque-port transport to be advertised via ALPN so that new proxies
   will not initiate opaque-transport connections to proxies from prior edge
   releases
-* Added inbound proxy transport metrics with `tls="passhtru"` when forwarding
+* Added inbound proxy transport metrics with `tls="passthru"` when forwarding
   non-mesh TLS connections
 * Thanks to @hs0210 for adding new unit tests!
 
@@ -786,7 +1083,7 @@ async runtime.
   `linkerd-jaeger` extension is working correctly
 * Added new `linkerd jaeger uninstall` CLI command to print the `linkerd-jaeger`
   extension's resources so that they can be piped into `kubectl delete`
-* Fixed an issue where the `linkerd-cni` daemgitonset may not be installed on all
+* Fixed an issue where the `linkerd-cni` daemonset may not be installed on all
   intended nodes, due to missing tolerations to the `linkerd-cni` Helm chart
   (thanks @rish-onesignal!)
 * Fixed an issue where the `tap` APIServer would not refresh its certs

@@ -430,12 +430,19 @@ func TestInstallOrUpgradeCli(t *testing.T) {
 			"'kubectl apply' command failed\n%s", cmdOut)
 	}
 
-	TestHelper.WaitRollout(t)
+	TestHelper.WaitRollout(t, testutil.LinkerdDeployReplicasEdge)
+
+	// It is necessary to clone LinkerdVizDeployReplicas so that we do not
+	// mutate its original value.
+	expectedDeployments := make(map[string]testutil.DeploySpec)
+	for k, v := range testutil.LinkerdVizDeployReplicas {
+		expectedDeployments[k] = v
+	}
 
 	if TestHelper.ExternalPrometheus() {
 
 		// Install external prometheus
-		out, err := TestHelper.LinkerdRun("inject", "testdata/external_prometheus.yaml")
+		out, err := TestHelper.LinkerdRun("inject", "testdata/external_prometheus.yaml", "--manual")
 		if err != nil {
 			testutil.AnnotatedFatalf(t, "'linkerd inject' command failed", "'linkerd inject' command failed: %s", err)
 		}
@@ -446,7 +453,9 @@ func TestInstallOrUpgradeCli(t *testing.T) {
 				"kubectl apply command failed\n%s", out)
 		}
 
-		// Update args to use external proemtheus
+		expectedDeployments["prometheus"] = testutil.DeploySpec{Namespace: "external-prometheus", Replicas: 1}
+
+		// Update args to use external prometheus
 		vizArgs = append(vizArgs, "--set", "prometheusUrl=http://prometheus.external-prometheus.svc.cluster.local:9090", "--set", "prometheus.enabled=false")
 	}
 
@@ -462,6 +471,8 @@ func TestInstallOrUpgradeCli(t *testing.T) {
 		testutil.AnnotatedFatalf(t, "'kubectl apply' command failed",
 			"'kubectl apply' command failed\n%s", out)
 	}
+
+	TestHelper.WaitRollout(t, expectedDeployments)
 }
 
 // These need to be updated (if there are changes) once a new stable is released
@@ -535,13 +546,14 @@ func TestInstallHelm(t *testing.T) {
 		testutil.AnnotatedFatalf(t, "'helm install' command failed",
 			"'helm install' command failed\n%s\n%s", stdout, stderr)
 	}
-
-	TestHelper.WaitRollout(t)
+	TestHelper.WaitRollout(t, testutil.LinkerdDeployReplicasEdge)
 
 	if stdout, stderr, err := TestHelper.HelmCmdPlain("install", vizChartToInstall, "l5d-viz", vizArgs...); err != nil {
 		testutil.AnnotatedFatalf(t, "'helm install' command failed",
 			"'helm install' command failed\n%s\n%s", stdout, stderr)
 	}
+
+	TestHelper.WaitRollout(t, testutil.LinkerdVizDeployReplicas)
 }
 
 func TestControlPlaneResourcesPostInstall(t *testing.T) {
@@ -628,21 +640,25 @@ func TestUpgradeHelm(t *testing.T) {
 		"--set", "proxyInjectorProxyResources.cpu.limit=1060m",
 		"--set", "proxyInjectorProxyResources.memory.request=106Mi",
 		"--atomic",
+		"--timeout", "60m",
 		"--wait",
 	}
-	extraArgs, extraVizArgs := helmOverridesEdge(helmTLSCerts)
+	extraArgs, vizArgs := helmOverridesEdge(helmTLSCerts)
 	args = append(args, extraArgs...)
 	if stdout, stderr, err := TestHelper.HelmUpgrade(TestHelper.GetHelmChart(), args...); err != nil {
 		testutil.AnnotatedFatalf(t, "'helm upgrade' command failed",
 			"'helm upgrade' command failed\n%s\n%s", stdout, stderr)
 	}
+	TestHelper.WaitRollout(t, testutil.LinkerdDeployReplicasEdge)
 
 	vizChart := TestHelper.GetLinkerdVizHelmChart()
-	vizArgs := append(extraVizArgs, "--wait")
 	if stdout, stderr, err := TestHelper.HelmCmdPlain("upgrade", vizChart, "l5d-viz", vizArgs...); err != nil {
 		testutil.AnnotatedFatalf(t, "'helm upgrade' command failed",
 			"'helm upgrade' command failed\n%s\n%s", stdout, stderr)
 	}
+
+	TestHelper.WaitRollout(t, testutil.LinkerdVizDeployReplicas)
+
 	TestHelper.AddInstalledExtension(vizExtensionName)
 }
 
@@ -887,6 +903,13 @@ func testCheckCommand(t *testing.T, stage, expectedVersion, namespace, cliVersio
 
 	expected := getCheckOutput(t, golden, TestHelper.GetLinkerdNamespace())
 
+	// When performing the check before upgrading, the policy-validator will not be installed yet.
+	if (TestHelper.UpgradeFromVersion() != "" && expectedVersion == TestHelper.UpgradeFromVersion()) ||
+		(TestHelper.UpgradeHelmFromVersion() != "" && expectedVersion == TestHelper.UpgradeHelmFromVersion()) {
+		expected = strings.ReplaceAll(expected, "√ policy-validator webhook has valid cert\n", "")
+		expected = strings.ReplaceAll(expected, "√ policy-validator cert is valid for at least 60 days\n", "")
+	}
+
 	timeout := time.Minute * 5
 	err := TestHelper.RetryFor(timeout, func() error {
 		if cliVersionOverride != "" {
@@ -943,12 +966,18 @@ func getCheckOutput(t *testing.T, goldenFile string, namespace string) string {
 		testutil.AnnotatedFatal(t, fmt.Sprintf("failed to retrieve pods: %s", err), err)
 	}
 
+	proxyVersionErr := ""
+	err = healthcheck.CheckProxyVersionsUpToDate(pods, version.Channels{})
+	if err != nil {
+		proxyVersionErr = err.Error()
+	}
+
 	tpl := template.Must(template.ParseFiles("testdata" + "/" + goldenFile))
 	vars := struct {
 		ProxyVersionErr string
 		HintURL         string
 	}{
-		healthcheck.CheckProxyVersionsUpToDate(pods, version.Channels{}).Error(),
+		proxyVersionErr,
 		healthcheck.HintBaseURL(TestHelper.GetVersion()),
 	}
 
@@ -995,7 +1024,7 @@ func TestCheckViz(t *testing.T) {
 		testutil.AnnotatedFatal(t, fmt.Sprintf("failed to parse check.viz.golden template: %s", err), err)
 	}
 
-	timeout := time.Minute
+	timeout := 5 * time.Minute
 	err = TestHelper.RetryFor(timeout, func() error {
 		out, err := TestHelper.LinkerdRun(cmd...)
 		if err != nil {
@@ -1022,21 +1051,6 @@ func TestUpgradeTestAppWorksAfterUpgrade(t *testing.T) {
 		}
 	} else {
 		t.Skip("Skipping for non upgrade test")
-	}
-}
-
-func TestInstallSP(t *testing.T) {
-	cmd := []string{"diagnostics", "install-sp"}
-
-	out, err := TestHelper.LinkerdRun(cmd...)
-	if err != nil {
-		testutil.AnnotatedFatal(t, "'linkerd install-sp' command failed", err)
-	}
-
-	out, err = TestHelper.KubectlApply(out, TestHelper.GetLinkerdNamespace())
-	if err != nil {
-		testutil.AnnotatedFatalf(t, "'kubectl apply' command failed",
-			"'kubectl apply' command failed\n%s", out)
 	}
 }
 

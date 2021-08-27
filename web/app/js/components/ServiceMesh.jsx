@@ -34,6 +34,17 @@ const styles = {
   },
 };
 
+const installedExtensionsColumn = [
+  {
+    title: <Trans>columnTitleName</Trans>,
+    dataIndex: 'name',
+  },
+  {
+    title: <Trans>columnTitleNamespace</Trans>,
+    dataIndex: 'namespace',
+  },
+];
+
 const serviceMeshDetailsColumns = [
   {
     title: <Trans>columnTitleName</Trans>,
@@ -72,6 +83,7 @@ class ServiceMesh extends React.Component {
     this.state = {
       pollingInterval: 2000,
       components: [],
+      extensions: [],
       nsStatuses: [],
       pendingRequests: false,
       loaded: false,
@@ -81,6 +93,7 @@ class ServiceMesh extends React.Component {
 
   componentDidMount() {
     this.startServerPolling();
+    this.fetchAllInstalledExtensions();
   }
 
   componentDidUpdate(prevProps) {
@@ -107,6 +120,12 @@ class ServiceMesh extends React.Component {
       { key: 3, name: <Trans>Control plane components</Trans>, value: components.length },
       { key: 4, name: <Trans>Data plane proxies</Trans>, value: this.proxyCount() },
     ];
+  }
+
+  getInstalledExtensions() {
+    const { extensions } = this.state;
+    const extensionList = !_isEmpty(extensions.extensions) ? extensions.extensions : [];
+    return extensionList;
   }
 
   getControllerComponentData = podData => {
@@ -190,6 +209,15 @@ class ServiceMesh extends React.Component {
       .catch(this.handleApiError);
   }
 
+  fetchAllInstalledExtensions() {
+    this.api.setCurrentRequests([this.api.fetchExtension()]);
+    this.serverPromise = Promise.all(this.api.getCurrentPromises())
+      .then(([extensions]) => {
+        this.setState({ extensions });
+      })
+      .catch(this.handleApiError);
+  }
+
   handleApiError(e) {
     if (e.isCanceled) {
       return;
@@ -216,7 +244,7 @@ class ServiceMesh extends React.Component {
 
     return (
       <React.Fragment>
-        <Grid container justify="space-between">
+        <Grid container justifyContent="space-between">
           <Grid item xs={3}>
             <Typography variant="h6"><Trans>Control plane</Trans></Typography>
           </Grid>
@@ -230,6 +258,23 @@ class ServiceMesh extends React.Component {
           data={components}
           statusColumnTitle="Pod Status"
           shouldLink={false} />
+      </React.Fragment>
+    );
+  }
+
+  renderInstalledExtensions() {
+    return (
+      <React.Fragment>
+        <Grid container justify="space-between">
+          <Grid item xs={3}>
+            <Typography variant="h6"><Trans>Installed Extensions</Trans></Typography>
+          </Grid>
+        </Grid>
+        <BaseTable
+          tableClassName="metric-table"
+          tableRows={this.getInstalledExtensions()}
+          tableColumns={installedExtensionsColumn}
+          rowKey={d => d.uid} />
       </React.Fragment>
     );
   }
@@ -275,7 +320,7 @@ class ServiceMesh extends React.Component {
       <Card elevation={3}>
         <CardContent>
           <Typography variant="body2">{message}</Typography>
-          { numUnadded > 0 ? incompleteMeshMessage() : null }
+          {numUnadded > 0 ? incompleteMeshMessage() : null}
         </CardContent>
       </Card>
     );
@@ -287,8 +332,8 @@ class ServiceMesh extends React.Component {
 
     return (
       <div className="page-content">
-        { !error ? null : <ErrorBanner message={error} /> }
-        { !loaded ? <Spinner /> : (
+        {!error ? null : <ErrorBanner message={error} />}
+        {!loaded ? <Spinner /> : (
           <div>
             {this.proxyCount() === 0 ?
               <CallToAction
@@ -298,6 +343,7 @@ class ServiceMesh extends React.Component {
             <Grid container spacing={3}>
               <Grid item xs={8} container direction="column">
                 <Grid item>{this.renderControlPlaneDetails()}</Grid>
+                <Grid item>{this.renderInstalledExtensions()}</Grid>
                 <Grid item>
                   <MeshedStatusTable tableRows={nsStatuses} />
                 </Grid>

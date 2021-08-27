@@ -8,15 +8,16 @@ The Linkerd maintainers are:
 * Eliza Weisman <eliza@buoyant.io> @hawkw
 * Kevin Leimkuhler <kevinl@buoyant.io> @kleimkuhler
 * Tarun Pothulapati <tarun@buoyant.io> @pothulapati
+* Matei David <matei@buoyant.io> @mateiidavid
 
 ## Steering Committee
 
 The Linkerd Steering Committee members are:
 
-* Chris Campbell @campbel
-* Christian Hüning @christianhuening
-* Justin Turner @justin-turner-heb
-* William King @quentusrex
+* Chris Campbell @campbel (HP)
+* Christian Hüning @christianhuening (finleap connect)
+* Justin Turner @justin-turner-heb (HEB)
+* William King @quentusrex (Subspace)
 
 ## Emeriti
 

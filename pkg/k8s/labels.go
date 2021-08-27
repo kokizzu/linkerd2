@@ -21,10 +21,6 @@ const (
 	// Prefix is the prefix common to all labels and annotations injected by Linkerd
 	Prefix = "linkerd.io"
 
-	// LinkerdNamespaceLabel is a label that helps identifying the namespaces
-	// that contain a Linkerd control plane
-	LinkerdNamespaceLabel = Prefix + "/is-control-plane"
-
 	// LinkerdExtensionLabel is a label that helps identifying the namespace
 	// that contain a Linkerd Extension
 	LinkerdExtensionLabel = Prefix + "/extension"
@@ -84,7 +80,7 @@ const (
 	// Enabled is used by annotations whose valid values include "enabled".
 	Enabled = "enabled"
 
-	// Disabled is used by annotations whose valid values incluce "disabled".
+	// Disabled is used by annotations whose valid values include "disabled".
 	Disabled = "disabled"
 
 	/*
@@ -94,10 +90,6 @@ const (
 	// CreatedByAnnotation indicates the source of the injected data plane
 	// (e.g. linkerd/cli v2.0.0).
 	CreatedByAnnotation = Prefix + "/created-by"
-
-	// IdentityIssuerExpiryAnnotation indicates the time at which this set of identity
-	// issuer credentials will cease to be valid.
-	IdentityIssuerExpiryAnnotation = Prefix + "/identity-issuer-expiry"
 
 	// ProxyVersionAnnotation indicates the version of the injected data plane
 	// (e.g. v0.1.3).
@@ -182,6 +174,12 @@ const (
 	// config.
 	ProxyOutboundPortAnnotation = ProxyConfigAnnotationsPrefix + "/outbound-port"
 
+	// ProxyPodInboundPortsAnnotation can be used to set a comma-separated
+	// list of (non-proxy) container ports exposed by the pod spec. Useful
+	// when other mutating webhooks inject sidecar containers after the
+	// proxy injector has run.
+	ProxyPodInboundPortsAnnotation = ProxyConfigAnnotationsPrefix + "/pod-inbound-ports"
+
 	// ProxyCPURequestAnnotation can be used to override the requestCPU config.
 	ProxyCPURequestAnnotation = ProxyConfigAnnotationsPrefix + "/proxy-cpu-request"
 
@@ -246,6 +244,10 @@ const (
 	// to be ready.
 	ProxyAwait = ProxyConfigAnnotationsPrefix + "/proxy-await"
 
+	// ProxyDefaultInboundPolicyAnnotation is used to configure the default
+	// inbound policy of the proxy
+	ProxyDefaultInboundPolicyAnnotation = ProxyConfigAnnotationsPrefix + "/default-inbound-policy"
+
 	// IdentityModeDefault is assigned to IdentityModeAnnotation to
 	// use the control plane's default identity scheme.
 	IdentityModeDefault = "default"
@@ -254,6 +256,23 @@ const (
 	// disable the proxy from participating in automatic identity.
 	IdentityModeDisabled = Disabled
 
+	// AllUnauthenticated allows all unathenticated connections.
+	AllUnauthenticated = "all-unauthenticated"
+
+	// AllAuthenticated allows all authenticated connections.
+	AllAuthenticated = "all-authenticated"
+
+	// ClusterUnauthenticated allows all unauthenticated connections from
+	// within the cluster.
+	ClusterUnauthenticated = "cluster-unauthenticated"
+
+	// ClusterAuthenticated allows all authenticated connections from within
+	// the cluster.
+	ClusterAuthenticated = "cluster-authenticated"
+
+	// Deny denies all connections.
+	Deny = "deny"
+
 	/*
 	 * Component Names
 	 */
@@ -261,11 +280,8 @@ const (
 	// ConfigConfigMapName is the name of the ConfigMap containing the linkerd controller configuration.
 	ConfigConfigMapName = "linkerd-config"
 
-	// AddOnsConfigMapName is the name of the ConfigMap containing the linkerd add-ons configuration.
-	AddOnsConfigMapName = "linkerd-config-addons"
-
-	// DebugSidecarName is the name of the default linkerd debug container
-	DebugSidecarName = "linkerd-debug"
+	// DebugContainerName is the name of the default linkerd debug container
+	DebugContainerName = "linkerd-debug"
 
 	// DebugSidecarImage is the image name of the default linkerd debug container
 	DebugSidecarImage = "cr.l5d.io/linkerd/debug"
@@ -317,11 +333,8 @@ const (
 	// SPValidatorWebhookConfigName is the name of the validating webhook configuration
 	SPValidatorWebhookConfigName = SPValidatorWebhookServiceName + "-webhook-config"
 
-	// TapServiceName is the name of the tap APIService
-	TapServiceName = "linkerd-tap"
-
-	// TapAPIRegistrationServiceName is the name of the tap APIService registration resource
-	TapAPIRegistrationServiceName = "v1alpha1.tap.linkerd.io"
+	// PolicyValidatorWebhookConfigName is the name of the validating webhook configuration
+	PolicyValidatorWebhookConfigName = "linkerd-policy-validator-webhook-config"
 
 	// AdmissionWebhookLabel indicates whether admission webhooks are enabled for a namespace
 	AdmissionWebhookLabel = ProxyConfigAnnotationsPrefix + "/admission-webhooks"
@@ -333,25 +346,18 @@ const (
 	// MountPathBase is the base directory of the mount path.
 	MountPathBase = "/var/run/linkerd"
 
+	// MountPathTrustRootsBase is the base directory of the trust roots.
+	MountPathTrustRootsBase = MountPathBase + "/identity/trust-roots"
+
+	// MountPathTrustRootsPEM is the path at which the trust bundle is mounted.
+	MountPathTrustRootsPEM = MountPathTrustRootsBase + "/ca-bundle.crt"
+
 	// MountPathServiceAccount is the default path where Kubernetes stores
 	// the service account token
 	MountPathServiceAccount = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-	// MountPathGlobalConfig is the path at which the global config file is mounted.
-	MountPathGlobalConfig = MountPathBase + "/config/global"
-
-	// MountPathProxyConfig is the path at which the global config file is mounted.
-	MountPathProxyConfig = MountPathBase + "/config/proxy"
-
-	// MountPathInstallConfig is the path at which the install config file is mounted.
-	MountPathInstallConfig = MountPathBase + "/config/install"
-
 	// MountPathValuesConfig is the path at which the values config file is mounted.
 	MountPathValuesConfig = MountPathBase + "/config/values"
-
-	// MountPathEndEntity is the path at which a tmpfs directory is mounted to
-	// store identity credentials.
-	MountPathEndEntity = MountPathBase + "/identity/end-entity"
 
 	// MountPathTLSBase is the path at which the TLS cert and key PEM files are mounted
 	MountPathTLSBase = MountPathBase + "/tls"
@@ -361,16 +367,6 @@ const (
 
 	// MountPathTLSCrtPEM is the path at which the TLS cert PEM file is mounted.
 	MountPathTLSCrtPEM = MountPathTLSBase + "/tls.crt"
-
-	// MountPathXtablesLock is the path at which the proxy init container mounts xtables
-	// This is necessary for xtables-legacy support
-	MountPathXtablesLock = "/run"
-
-	// IdentityServiceAccountTokenPath is the path to the kubernetes service
-	// account token used by proxies to provision identity.
-	//
-	// In the future, this should be changed to a time- and audience-scoped secret.
-	IdentityServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
 	/*
 	 * Service mirror constants
@@ -395,6 +391,10 @@ const (
 	// MirroredGatewayLabel indicates that this is a mirrored gateway
 	MirroredGatewayLabel = SvcMirrorPrefix + "/mirrored-gateway"
 
+	// MirroredHeadlessSvcNameLabel indicates the root headless service for
+	// mirrored headless hosts.
+	MirroredHeadlessSvcNameLabel = SvcMirrorPrefix + "/headless-mirror-svc-name"
+
 	// RemoteClusterNameLabel put on a local mirrored service, it
 	// allows us to associate a mirrored service with a remote cluster
 	RemoteClusterNameLabel = SvcMirrorPrefix + "/cluster-name"
@@ -406,11 +406,6 @@ const (
 	// RemoteServiceFqName is the fully qualified name of the mirrored service
 	// on the remote cluster
 	RemoteServiceFqName = SvcMirrorPrefix + "/remote-svc-fq-name"
-
-	// RemoteGatewayResourceVersionAnnotation is the last observed remote resource
-	// version of the gateway for a particular mirrored service. It is used
-	// in cases we detect a change in a remote gateway
-	RemoteGatewayResourceVersionAnnotation = SvcMirrorPrefix + "/remote-gateway-resource-version"
 
 	// RemoteGatewayIdentity follows the same kind of logic as RemoteGatewayNameLabel
 	RemoteGatewayIdentity = SvcMirrorPrefix + "/remote-gateway-identity"
@@ -433,9 +428,6 @@ const (
 
 	// ProbePortName is the name of the probe port of the gateway
 	ProbePortName = "mc-probe"
-
-	// ServiceMirrorLabel is the value used in the controller component label
-	ServiceMirrorLabel = "servicemirror"
 )
 
 // CreatedByAnnotationValue returns the value associated with

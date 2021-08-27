@@ -28,11 +28,10 @@ about testing from source can be found in the [TEST.md](TEST.md) guide.
     - [First time setup](#first-time-setup)
     - [Run web standalone](#run-web-standalone)
     - [Webpack dev server](#webpack-dev-server)
-    - [Javascript dependencies](#javascript-dependencies)
+    - [JavaScript dependencies](#javascript-dependencies)
     - [Translations](#translations)
   - [Rust](#rust)
     - [Docker](#docker)
-  - [Multi-architecture builds](#multi-architecture-builds)
 - [Dependencies](#dependencies)
   - [Updating protobuf dependencies](#updating-protobuf-dependencies)
   - [Updating ServiceProfile generated
@@ -63,7 +62,7 @@ its extensions are written in Go. The dashboard UI is a React application.
   - [`identity`](controller/identity): Provides a CA to distribute certificates
     to proxies for them to establish mTLS connections between them.
 - [`viz extension`](viz)
-  - ['metrics-api`](viz/metrics-api): Accepts requests from API clients such as
+  - [`metrics-api`](viz/metrics-api): Accepts requests from API clients such as
     cli and web, serving metrics from the proxies in the cluster through
     Prometheus queries.
   - [`tap`](viz/tap/api): Provides a live pipeline of requests.
@@ -73,7 +72,7 @@ its extensions are written in Go. The dashboard UI is a React application.
   - [`web`](web): Provides a UI dashboard to view and drive the control plane.
 - [`multicluster extension`](multicluster)
   - [`linkerd-gateway`]: Accepts requests from other clusters and forwards them
-    to the appropriate destionation in the local cluster.
+    to the appropriate destination in the local cluster.
   - [`linkerd-service-mirror-xxx`](multicluster/service-mirror): Controller
     observing the labeling of exported services in the target cluster, each one
     for which it will create a mirrored service in the local cluster.
@@ -279,21 +278,18 @@ the `bin/fmt` script.
 
 The script for building the CLI binaries using docker is
 `bin/docker-build-cli-bin`. This will also be called indirectly when calling
-`bin/docker-build`. By default it creates binaries for Linux, Darwin and
-Windows. For Linux it will create a binary targeted at your current
-architecture. For targeting different architectures, check [Multi-architecture
-Builds](#multi-architecture-builds) below).
+`bin/docker-build`. By default it creates binaries for your current host's
+OS/arch.
 
-For local development and a faster edit-build-test cycle you might want to just
-target your local OS and architecture. For those situations you can just call
-`bin/build-cli-bin`.
+To cross-build targeting a different OS or architecture, set the environment
+variable `DOCKER_TARGET` according to any of the final stages available in
+[cli/Dockerfile](cli/Dockerfile).
 
-If you want to build all the controller images, plus only the CLI for your OS
-and architecture, just call:
+For local development and a faster edit-build-test cycle you can build directly
+without going through a docker container by calling `bin/build-cli-bin`.
 
-```bash
-LINKERD_LOCAL_BUILD_CLI=1 bin/docker-build
-```
+If you set the environment variable `LINKERD_LOCAL_BUILD_CLI=1` then
+`bin/docker-build` will use this last method for the step that builds the CLI.
 
 #### Running the control plane for development
 
@@ -371,17 +367,15 @@ To develop with a webpack dev server:
     - `web` on :7777. This is the golang process that serves the dashboard.
     - `webpack-dev-server` on :8080 to manage rebuilding/reloading of the
       javascript.
-    - `controller` is port-forwarded from the Kubernetes cluster via `kubectl`
-      on :8185
     - `grafana` is port-forwarded from the Kubernetes cluster via `kubectl` on
       :3000
-    - `metrics-api` is port-forwarded from the Kubernets cluster via `kubectl`
+    - `metrics-api` is port-forwarded from the Kubernetes cluster via `kubectl`
       on :8085
 
 2. Go to [http://localhost:7777](http://localhost:7777) to see everything
    running.
 
-#### Javascript dependencies
+#### JavaScript dependencies
 
 To add a JS dependency:
 
@@ -407,6 +401,12 @@ yarn lingui extract
 ...
 yarn lingui compile # done automatically in bin/web run
 ```
+
+Finally, make sure the new locale is also referred in the following places:
+
+- Under the `lingui` section in `package.json`
+- In the `make-plural/plurals` import in `index.js`
+- In the `langOptions` object in `index.js`
 
 ### Rust
 
@@ -441,25 +441,6 @@ Now, to make a pod use your image, add the following annotations to it:
 
 ```yaml
 config.linkerd.io/proxy-version: dev
-```
-
-### Multi-architecture builds
-
-Besides the default Linux/amd64 architecture, you can build controller images
-targeting Linux/arm64 and Linux/arm/v7.
-
-For signaling that you want to build multi-architecture images, set the
-environment variable `DOCKER_MULTIARCH=1`. Do to some limitations on buildx, if
-you'd like to do that you're also forced to signal buildx to push the images to
-the registry by setting `DOCKER_PUSH=1`. Naturally, you can't push to the
-official registry and will have to override `DOCKER_REGISTRY` with a registry
-that you control.
-
-To summarize, in order to build all the images for multiple architectures and
-push them to your registry located for example at `ghcr.io/user` you can issue:
-
-```bash
-DOCKER_MULTIARCH=1 DOCKER_PUSH=1 DOCKER_REGISTRY=ghcr.io/user bin/docker-build
 ```
 
 ## Dependencies

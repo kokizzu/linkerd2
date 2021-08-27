@@ -22,7 +22,7 @@ var (
 	opaqueUnmeshedSvcPod = "opaque-unmeshed-svc"
 	opaqueUnmeshedSvcSC  = "slow-cooker-opaque-unmeshed-svc"
 	tcpMetricRE          = regexp.MustCompile(
-		`tcp_open_total\{direction="inbound",peer="src",target_addr="[0-9\.]+:[0-9]+",tls="true",client_id="default\.linkerd-opaque-ports-test\.serviceaccount\.identity\.linkerd\.cluster\.local"\} [0-9]+`,
+		`tcp_open_total\{direction="inbound",peer="src",target_addr="[0-9\.]+:[0-9]+",tls="true",client_id="default\.linkerd-opaque-ports-test\.serviceaccount\.identity\.linkerd\.cluster\.local",srv_name="default:all-unauthenticated".*} [0-9]+`,
 	)
 	tcpMetricOutUnmeshedRE = regexp.MustCompile(
 		`tcp_open_total\{direction="outbound",peer="dst",authority="[a-zA-Z\-]+\.[a-zA-Z\-]+\.svc\.cluster\.local:[0-9]+",target_addr="[0-9\.]+:[0-9]+",tls="no_identity",no_tls_reason="not_provided_by_service_discovery",.*\} [0-9]+`,
@@ -94,7 +94,7 @@ func TestOpaquePorts(t *testing.T) {
 	// Wait for slow-cookers to start sending requests
 	time.Sleep(20 * time.Second)
 
-	t.Run("expect absent HTTP outbound requests for opaque-pod slow clooker", func(t *testing.T) {
+	t.Run("expect absent HTTP outbound requests for opaque-pod slow cooker", func(t *testing.T) {
 		// Check the slow cooker metrics
 		pods, err := TestHelper.GetPods(ctx, opaquePortsNs, map[string]string{"app": opaquePodSC})
 		if err != nil {

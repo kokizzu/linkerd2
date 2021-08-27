@@ -38,6 +38,7 @@ spec:
         {{ include "partials.annotations.created-by" . }}
         {{- include "partials.proxy.annotations" . | nindent 8}}
         {{- with .Values.podAnnotations }}{{ toYaml . | trim | nindent 8 }}{{- end }}
+        config.linkerd.io/opaque-ports: "8443"
       labels:
         linkerd.io/control-plane-component: proxy-injector
         linkerd.io/control-plane-ns: {{.Values.namespace}}
@@ -59,6 +60,8 @@ spec:
       {{- $_ := set $tree.Values.proxy "resources" $r }}
       {{- end }}
       {{- $_ := set $tree.Values.proxy "await" true }}
+      {{- $_ := set $tree.Values.proxy "loadTrustBundleFromConfigMap" true }}
+      {{- $_ := set $tree.Values.proxy "podInboundPorts" "8443,9995" }}
       - {{- include "partials.proxy" $tree | indent 8 | trimPrefix (repeat 7 " ") }}
       - args:
         - proxy-injector
@@ -90,6 +93,8 @@ spec:
         volumeMounts:
         - mountPath: /var/run/linkerd/config
           name: config
+        - mountPath: /var/run/linkerd/identity/trust-roots
+          name: trust-roots
         - mountPath: /var/run/linkerd/tls
           name: tls
           readOnly: true
@@ -105,6 +110,9 @@ spec:
       - configMap:
           name: linkerd-config
         name: config
+      - configMap:
+          name: linkerd-identity-trust-roots
+        name: trust-roots
       - name: tls
         secret:
           secretName: linkerd-proxy-injector-k8s-tls
@@ -123,6 +131,7 @@ metadata:
     linkerd.io/control-plane-ns: {{.Values.namespace}}
   annotations:
     {{ include "partials.annotations.created-by" . }}
+    config.linkerd.io/opaque-ports: "443"
 spec:
   type: ClusterIP
   selector:

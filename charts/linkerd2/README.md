@@ -84,7 +84,7 @@ helm install \
 
 ## Get involved
 
-* Check out Linkerd's source code at [Github][linkerd2].
+* Check out Linkerd's source code at [GitHub][linkerd2].
 * Join Linkerd's [user mailing list][linkerd-users], [developer mailing
   list][linkerd-dev], and [announcements mailing list][linkerd-announce].
 * Follow [@linkerd][twitter] on Twitter.
@@ -127,7 +127,7 @@ Kubernetes: `>=1.16.0-0`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | clusterDomain | string | `"cluster.local"` | Kubernetes DNS Domain name to use |
-| clusterNetworks | string | `"10.0.0.0/8,100.64.0.0/10,172.16.0.0/12,192.168.0.0/16"` | The cluster networks for which service discovery is performed. This should include the pod network but need not include the node network. By default, all private networks are specified so that resolution works in typical Kubernetes environments. |
+| clusterNetworks | string | `"10.0.0.0/8,100.64.0.0/10,172.16.0.0/12,192.168.0.0/16"` | The cluster networks for which service discovery is performed. This should include the pod and service networks, but need not include the node network. By default, all private networks are specified so that resolution works in typical Kubernetes environments. |
 | cniEnabled | bool | `false` | enabling this omits the NET_ADMIN capability in the PSP and the proxy-init container when injecting the proxy; requires the linkerd-cni plugin to already be installed |
 | controlPlaneTracing | bool | `false` | enables control plane tracing |
 | controlPlaneTracingNamespace | string | `"linkerd-jaeger"` | namespace to send control plane traces to |
@@ -142,6 +142,8 @@ Kubernetes: `>=1.16.0-0`
 | disableHeartBeat | bool | `false` | Set to true to not start the heartbeat cronjob |
 | enableEndpointSlices | bool | `false` | enables the use of EndpointSlice informers for the destination service; enableEndpointSlices should be set to true only if EndpointSlice K8s feature gate is on; the feature is still experimental. |
 | enableH2Upgrade | bool | `true` | Allow proxies to perform transparent HTTP/2 upgrading |
+| enablePSP | bool | `false` | Add a PSP resource and bind it to the control plane ServiceAccounts. Note PSP has been deprecated since k8s v1.21 |
+| identity.externalCA | bool | `false` | If the linkerd-identity-trust-roots ConfigMap has already been created |
 | identity.issuer.clockSkewAllowance | string | `"20s"` | Amount of time to allow for clock skew within a Linkerd cluster |
 | identity.issuer.crtExpiry | string | `nil` | Expiration timestamp for the issuer certificate. It must be provided during install. Must match the expiry date in crtPEM |
 | identity.issuer.issuanceLifetime | string | `"24h0m0s"` | Amount of time for which the Identity issuer should certify identity |
@@ -153,13 +155,28 @@ Kubernetes: `>=1.16.0-0`
 | identityTrustDomain | string | clusterDomain | Trust domain used for identity |
 | imagePullPolicy | string | `"IfNotPresent"` | Docker image pull policy |
 | imagePullSecrets | list | `[]` | For Private docker registries, authentication is needed.  Registry secrets are applied to the respective service accounts |
-| installNamespace | bool | `true` | Set to false when installing Linkerd in a custom namespace. See the [Linkerd documentation](https://linkerd.io/2/tasks/install-helmcustomizing-the-namespace) for more information. |
+| installNamespace | bool | `true` | Set to false when installing Linkerd in a custom namespace. See the [Linkerd documentation](https://linkerd.io/2/tasks/install-helm#customizing-the-namespace) for more information. |
 | linkerdVersion | string | `"linkerdVersionValue"` | control plane version. See Proxy section for proxy version |
 | namespace | string | `"linkerd"` | Control plane namespace |
 | nodeSelector | object | `{"beta.kubernetes.io/os":"linux"}` | NodeSelector section, See the [K8S documentation](https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#nodeselector) for more information |
 | omitWebhookSideEffects | bool | `false` | Omit the `sideEffects` flag in the webhook manifests |
 | podAnnotations | object | `{}` | Additional annotations to add to all pods |
 | podLabels | object | `{}` | Additional labels to add to all pods |
+| policyController.defaultAllowPolicy | string | "all-unauthenticated" | The default allow policy to use when no `Server` selects a pod.  One of: "all-authenticated", "all-unauthenticated", "cluster-authenticated", "cluster-unauthenticated", "deny" |
+| policyController.image.name | string | `"cr.l5d.io/linkerd/policy-controller"` | Docker image for the proxy |
+| policyController.image.pullPolicy | string | imagePullPolicy | Pull policy for the proxy container Docker image |
+| policyController.image.version | string | linkerdVersion | Tag for the proxy container Docker image |
+| policyController.logLevel | string | `"linkerd=info,warn"` | Log level for the policy controller |
+| policyController.resources | object | destinationResources | policy controller resource requests & limits |
+| policyController.resources.cpu.limit | string | `""` | Maximum amount of CPU units that the policy controller can use |
+| policyController.resources.cpu.request | string | `""` | Amount of CPU units that the policy controller requests |
+| policyController.resources.memory.limit | string | `""` | Maximum amount of memory that the policy controller can use |
+| policyController.resources.memory.request | string | `""` | Maximum amount of memory that the policy controller requests |
+| policyValidator.caBundle | string | `""` | Bundle of CA certificates for policy validator. If not provided then Helm will use the certificate generated  for `policyValidator.crtPEM`. If `policyValidator.externalSecret` is set to true, this value must be set, as no certificate will be generated. |
+| policyValidator.crtPEM | string | `""` | Certificate for the policy validator. If not provided then Helm will generate one. |
+| policyValidator.externalSecret | bool | `false` | Do not create a secret resource for the policyValidator webhook. If this is set to `true`, the value `policyValidator.caBundle` must be set (see below). |
+| policyValidator.keyPEM | string | `""` | Certificate key for the policy validator. If not provided then Helm will generate one. |
+| policyValidator.namespaceSelector | object | `{"matchExpressions":[{"key":"config.linkerd.io/admission-webhooks","operator":"NotIn","values":["disabled"]}]}` | Namespace selector used by admission webhook |
 | profileValidator.caBundle | string | `""` | Bundle of CA certificates for service profile validator. If not provided then Helm will use the certificate generated  for `profileValidator.crtPEM`. If `profileValidator.externalSecret` is set to true, this value must be set, as no certificate will be generated. |
 | profileValidator.crtPEM | string | `""` | Certificate for the service profile validator. If not provided then Helm will generate one. |
 | profileValidator.externalSecret | bool | `false` | Do not create a secret resource for the profileValidator webhook. If this is set to `true`, the value `profileValidator.caBundle` must be set (see below). |
@@ -174,7 +191,7 @@ Kubernetes: `>=1.16.0-0`
 | proxy.inboundConnectTimeout | string | `"100ms"` | Maximum time allowed for the proxy to establish an inbound TCP connection |
 | proxy.logFormat | string | `"plain"` | Log format (`plain` or `json`) for the proxy |
 | proxy.logLevel | string | `"warn,linkerd=info"` | Log level for the proxy |
-| proxy.opaquePorts | string | `"25,443,587,3306,5432,11211"` | Default set of opaque ports - SMTP (25,587) server-first - HTTPS (443) opaque TLS - MYSQL (3306) server-first - PostgreSQL (5432) server-first - Memcached (11211) clients do not issue any preamble, which breaks detection |
+| proxy.opaquePorts | string | `"25,443,587,3306,4444,5432,6379,9300,11211"` | Default set of opaque ports - SMTP (25,587) server-first - HTTPS (443) opaque TLS - MYSQL (3306) server-first - Galera (4444) server-first - PostgreSQL (5432) server-first - Redis (6379) server-first - ElasticSearch (9300) server-first - Memcached (11211) clients do not issue any preamble, which breaks detection |
 | proxy.outboundConnectTimeout | string | `"1000ms"` | Maximum time allowed for the proxy to establish an outbound TCP connection |
 | proxy.ports.admin | int | `4191` | Admin port for the proxy container |
 | proxy.ports.control | int | `4190` | Control port for the proxy container |
@@ -188,11 +205,11 @@ Kubernetes: `>=1.16.0-0`
 | proxy.uid | int | `2102` | User id under which the proxy runs |
 | proxy.waitBeforeExitSeconds | int | `0` | If set the proxy sidecar will stay alive for at least the given period before receiving SIGTERM signal from Kubernetes but no longer than pod's `terminationGracePeriodSeconds`. See [Lifecycle hooks](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks) for more info on container lifecycle hooks. |
 | proxyInit.closeWaitTimeoutSecs | int | `0` |  |
-| proxyInit.ignoreInboundPorts | string | `""` | Default set of inbound ports to skip via itpables |
-| proxyInit.ignoreOutboundPorts | string | `""` | Default set of outbound ports to skip via itpables |
+| proxyInit.ignoreInboundPorts | string | `"4567,4568"` | Default set of inbound ports to skip via iptables - Galera (4567,4568) |
+| proxyInit.ignoreOutboundPorts | string | `"4567,4568"` | Default set of outbound ports to skip via iptables - Galera (4567,4568) |
 | proxyInit.image.name | string | `"cr.l5d.io/linkerd/proxy-init"` | Docker image for the proxy-init container |
 | proxyInit.image.pullPolicy | string | imagePullPolicy | Pull policy for the proxy-init container Docker image |
-| proxyInit.image.version | string | `"v1.3.12"` | Tag for the proxy-init container Docker image |
+| proxyInit.image.version | string | `"v1.3.13"` | Tag for the proxy-init container Docker image |
 | proxyInit.resources.cpu.limit | string | `"100m"` | Maximum amount of CPU units that the proxy-init container can use |
 | proxyInit.resources.cpu.request | string | `"10m"` | Amount of CPU units that the proxy-init container requests |
 | proxyInit.resources.memory.limit | string | `"50Mi"` | Maximum amount of memory that the proxy-init container can use |

@@ -11,7 +11,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	coreUtil "github.com/linkerd/linkerd2/controller/api/util"
 	"github.com/linkerd/linkerd2/pkg/cmd"
 	pkgcmd "github.com/linkerd/linkerd2/pkg/cmd"
 	"github.com/linkerd/linkerd2/pkg/healthcheck"
@@ -19,6 +18,7 @@ import (
 	pb "github.com/linkerd/linkerd2/viz/metrics-api/gen/viz"
 	"github.com/linkerd/linkerd2/viz/metrics-api/util"
 	"github.com/linkerd/linkerd2/viz/pkg/api"
+	pkgUtil "github.com/linkerd/linkerd2/viz/pkg/util"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
@@ -150,6 +150,18 @@ If no resource name is specified, displays stats about all resources of the spec
   # Get all pods in all namespaces that call the hello1 service in the test namespace.
   linkerd viz stat pods --to svc/hello1 --to-namespace test --all-namespaces
 
+  # Get the web service. With Services, metrics are generated from the outbound metrics
+  # of clients, and thus will not include unmeshed client request metrics.
+  linkerd viz stat svc/web
+
+  # Get the web services and metrics for any traffic coming to the service from the hello1 deployment
+  # in the test namespace.
+  linkerd viz stat svc/web --from deploy/hello1 --from-namespace test
+
+  # Get the web services and metrics for all the traffic that reaches the web-pod1 pod
+  # in the test namespace exclusively.
+  linkerd viz stat svc/web --to pod/web-pod1 --to-namespace test
+
   # Get all services in all namespaces that receive calls from hello1 deployment in the test namespace.
   linkerd viz stat services --from deploy/hello1 --from-namespace test --all-namespaces
 
@@ -253,30 +265,10 @@ If no resource name is specified, displays stats about all resources of the spec
 	cmd.PersistentFlags().StringVarP(&options.labelSelector, "selector", "l", options.labelSelector, "Selector (label query) to filter on, supports '=', '==', and '!='")
 	cmd.PersistentFlags().BoolVar(&options.unmeshed, "unmeshed", options.unmeshed, "If present, include unmeshed resources in the output")
 
-	configureFlagCompletions(cmd)
+	pkgcmd.ConfigureNamespaceFlagCompletion(
+		cmd, []string{"namespace", "to-namespace", "from-namespace"},
+		kubeconfigPath, impersonate, impersonateGroup, kubeContext)
 	return cmd
-}
-
-func configureFlagCompletions(cmd *cobra.Command) {
-	flagNames := []string{"namespace", "to-namespace", "from-namespace"}
-	for _, flagName := range flagNames {
-		cmd.RegisterFlagCompletionFunc(flagName,
-			func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-				k8sAPI, err := k8s.NewAPI(kubeconfigPath, kubeContext, impersonate, impersonateGroup, 0)
-				if err != nil {
-					return nil, cobra.ShellCompDirectiveError
-				}
-
-				cc := k8s.NewCommandCompletion(k8sAPI, "")
-				results, err := cc.Complete([]string{"namespaces"}, toComplete)
-				if err != nil {
-					cobra.CompErrorln(err.Error())
-					return nil, cobra.ShellCompDirectiveError
-				}
-
-				return results, cobra.ShellCompDirectiveDefault
-			})
-	}
 }
 
 func respToRows(resp *pb.StatSummaryResponse) []*pb.StatTable_PodGroup_Row {
@@ -330,11 +322,17 @@ type row struct {
 	status string
 	*rowStats
 	*tsStats
+	*dstStats
 }
 
 type tsStats struct {
 	apex   string
 	leaf   string
+	weight string
+}
+
+type dstStats struct {
+	dst    string
 	weight string
 }
 
@@ -351,7 +349,7 @@ func statHasRequestData(stat *pb.BasicStats) bool {
 }
 
 func isPodOwnerResource(typ string) bool {
-	return typ != k8s.TrafficSplit && typ != k8s.Authority
+	return typ != k8s.TrafficSplit && typ != k8s.Authority && typ != k8s.Service
 }
 
 func writeStatsToBuffer(rows []*pb.StatTable_PodGroup_Row, w *tabwriter.Writer, options *statOptions) {
@@ -359,6 +357,7 @@ func writeStatsToBuffer(rows []*pb.StatTable_PodGroup_Row, w *tabwriter.Writer, 
 	maxNamespaceLength := len(namespaceHeader)
 	maxApexLength := len(apexHeader)
 	maxLeafLength := len(leafHeader)
+	maxDstLength := len(dstHeader)
 	maxWeightLength := len(weightHeader)
 
 	statTables := make(map[string]map[string]*row)
@@ -393,7 +392,7 @@ func writeStatsToBuffer(rows []*pb.StatTable_PodGroup_Row, w *tabwriter.Writer, 
 
 		namespace := r.Resource.Namespace
 		key := fmt.Sprintf("%s/%s", namespace, name)
-		if r.Resource.Type == k8s.TrafficSplit {
+		if r.Resource.Type == k8s.TrafficSplit || (r.Resource.Type == k8s.Service && r.TsStats != nil) {
 			key = fmt.Sprintf("%s/%s/%s", namespace, name, r.TsStats.Leaf)
 		}
 		resourceKey := r.Resource.Type
@@ -411,7 +410,7 @@ func writeStatsToBuffer(rows []*pb.StatTable_PodGroup_Row, w *tabwriter.Writer, 
 		}
 
 		meshedCount := fmt.Sprintf("%d/%d", r.MeshedPodCount, r.RunningPodCount)
-		if resourceKey == k8s.Authority {
+		if resourceKey == k8s.Authority || resourceKey == k8s.Service {
 			meshedCount = "-"
 		}
 		statTables[resourceKey][key] = &row{
@@ -432,26 +431,40 @@ func writeStatsToBuffer(rows []*pb.StatTable_PodGroup_Row, w *tabwriter.Writer, 
 			}
 		}
 		if r.TsStats != nil {
-			leaf := r.TsStats.Leaf
-			apex := r.TsStats.Apex
-			weight := r.TsStats.Weight
+			if r.GetResource().GetType() == k8s.TrafficSplit {
+				leaf := r.TsStats.Leaf
+				apex := r.TsStats.Apex
+				weight := r.TsStats.Weight
 
-			if len(leaf) > maxLeafLength {
-				maxLeafLength = len(leaf)
-			}
+				if len(leaf) > maxLeafLength {
+					maxLeafLength = len(leaf)
+				}
 
-			if len(apex) > maxApexLength {
-				maxApexLength = len(apex)
-			}
+				if len(apex) > maxApexLength {
+					maxApexLength = len(apex)
+				}
 
-			if len(weight) > maxWeightLength {
-				maxWeightLength = len(weight)
-			}
+				statTables[resourceKey][key].tsStats = &tsStats{
+					apex:   apex,
+					leaf:   leaf,
+					weight: weight,
+				}
+			} else {
+				dst := r.TsStats.Leaf
+				weight := r.TsStats.Weight
 
-			statTables[resourceKey][key].tsStats = &tsStats{
-				apex:   apex,
-				leaf:   leaf,
-				weight: weight,
+				if len(dst) > maxDstLength {
+					maxDstLength = len(dst)
+				}
+
+				if len(weight) > maxWeightLength {
+					maxWeightLength = len(weight)
+				}
+
+				statTables[resourceKey][key].dstStats = &dstStats{
+					dst:    dst,
+					weight: weight,
+				}
 			}
 		}
 	}
@@ -462,13 +475,13 @@ func writeStatsToBuffer(rows []*pb.StatTable_PodGroup_Row, w *tabwriter.Writer, 
 			fmt.Fprintln(os.Stderr, "No traffic found.")
 			return
 		}
-		printStatTables(statTables, w, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxWeightLength, options)
+		printStatTables(statTables, w, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxDstLength, maxWeightLength, options)
 	case jsonOutput:
 		printStatJSON(statTables, w)
 	}
 }
 
-func printStatTables(statTables map[string]map[string]*row, w *tabwriter.Writer, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxWeightLength int, options *statOptions) {
+func printStatTables(statTables map[string]map[string]*row, w *tabwriter.Writer, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxDstLength, maxWeightLength int, options *statOptions) {
 	usePrefix := false
 	if len(statTables) > 1 {
 		usePrefix = true
@@ -485,7 +498,7 @@ func printStatTables(statTables map[string]map[string]*row, w *tabwriter.Writer,
 			if !usePrefix {
 				resourceTypeLabel = ""
 			}
-			printSingleStatTable(stats, resourceTypeLabel, resourceType, w, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxWeightLength, options)
+			printSingleStatTable(stats, resourceTypeLabel, resourceType, w, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxDstLength, maxWeightLength, options)
 		}
 	}
 }
@@ -499,13 +512,28 @@ func showTCPConns(resourceType string) bool {
 	return resourceType != k8s.Authority && resourceType != k8s.TrafficSplit
 }
 
-func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType string, w *tabwriter.Writer, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxWeightLength int, options *statOptions) {
+func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType string, w *tabwriter.Writer, maxNameLength, maxNamespaceLength, maxLeafLength, maxApexLength, maxDstLength, maxWeightLength int, options *statOptions) {
 	headers := make([]string, 0)
 	nameTemplate := fmt.Sprintf("%%-%ds", maxNameLength)
 	namespaceTemplate := fmt.Sprintf("%%-%ds", maxNamespaceLength)
 	apexTemplate := fmt.Sprintf("%%-%ds", maxApexLength)
 	leafTemplate := fmt.Sprintf("%%-%ds", maxLeafLength)
+	dstTemplate := fmt.Sprintf("%%-%ds", maxDstLength)
 	weightTemplate := fmt.Sprintf("%%-%ds", maxWeightLength)
+
+	hasDstStats := false
+	for _, r := range stats {
+		if r.dstStats != nil {
+			hasDstStats = true
+		}
+	}
+
+	hasTsStats := false
+	for _, r := range stats {
+		if r.tsStats != nil {
+			hasTsStats = true
+		}
+	}
 
 	if options.allNamespaces {
 		headers = append(headers,
@@ -519,7 +547,11 @@ func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType
 		headers = append(headers, "STATUS")
 	}
 
-	if resourceType == k8s.TrafficSplit {
+	if hasDstStats {
+		headers = append(headers,
+			fmt.Sprintf(dstTemplate, dstHeader),
+			fmt.Sprintf(weightTemplate, weightHeader))
+	} else if hasTsStats {
 		headers = append(headers,
 			fmt.Sprintf(apexTemplate, apexHeader),
 			fmt.Sprintf(leafTemplate, leafHeader),
@@ -562,9 +594,12 @@ func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType
 			templateStringEmpty = "%s\t" + templateStringEmpty
 		}
 
-		if resourceType == k8s.TrafficSplit {
+		if hasTsStats {
 			templateString = "%s\t%s\t%s\t%s\t%.2f%%\t%.1frps\t%dms\t%dms\t%dms\t"
 			templateStringEmpty = "%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t"
+		} else if hasDstStats {
+			templateString = "%s\t%s\t%s\t%.2f%%\t%.1frps\t%dms\t%dms\t%dms\t"
+			templateStringEmpty = "%s\t%s\t%s\t-\t-\t-\t-\t-\t"
 		}
 
 		if !showTCPConns(resourceType) {
@@ -598,6 +633,7 @@ func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType
 
 		apexPadding := 0
 		leafPadding := 0
+		dstPadding := 0
 
 		if stats[key].tsStats != nil {
 			if maxApexLength > len(stats[key].tsStats.apex) {
@@ -606,6 +642,10 @@ func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType
 			if maxLeafLength > len(stats[key].tsStats.leaf) {
 				leafPadding = maxLeafLength - len(stats[key].tsStats.leaf)
 			}
+		} else if stats[key].dstStats != nil {
+			if maxDstLength > len(stats[key].dstStats.dst) {
+				dstPadding = maxDstLength - len(stats[key].dstStats.dst)
+			}
 		}
 
 		values = append(values, name+strings.Repeat(" ", padding))
@@ -613,11 +653,16 @@ func printSingleStatTable(stats map[string]*row, resourceTypeLabel, resourceType
 			values = append(values, stats[key].status)
 		}
 
-		if resourceType == k8s.TrafficSplit {
+		if hasTsStats {
 			values = append(values,
 				stats[key].tsStats.apex+strings.Repeat(" ", apexPadding),
 				stats[key].tsStats.leaf+strings.Repeat(" ", leafPadding),
 				stats[key].tsStats.weight,
+			)
+		} else if hasDstStats {
+			values = append(values,
+				stats[key].dstStats.dst+strings.Repeat(" ", dstPadding),
+				stats[key].dstStats.weight,
 			)
 		} else {
 			values = append(values, []interface{}{
@@ -676,6 +721,7 @@ type jsonStats struct {
 	TCPWriteBytes  *float64 `json:"tcp_write_bytes_rate,omitempty"`
 	Apex           string   `json:"apex,omitempty"`
 	Leaf           string   `json:"leaf,omitempty"`
+	Dst            string   `json:"dst,omitempty"`
 	Weight         string   `json:"weight,omitempty"`
 }
 
@@ -712,7 +758,10 @@ func printStatJSON(statTables map[string]map[string]*row, w *tabwriter.Writer) {
 				if stats[key].tsStats != nil {
 					entry.Apex = stats[key].apex
 					entry.Leaf = stats[key].leaf
-					entry.Weight = stats[key].weight
+					entry.Weight = stats[key].tsStats.weight
+				} else if stats[key].dstStats != nil {
+					entry.Dst = stats[key].dstStats.dst
+					entry.Weight = stats[key].dstStats.weight
 				}
 				entries = append(entries, entry)
 			}
@@ -736,20 +785,20 @@ func getNamePrefix(resourceType string) string {
 }
 
 func buildStatSummaryRequests(resources []string, options *statOptions) ([]*pb.StatSummaryRequest, error) {
-	targets, err := coreUtil.BuildResources(options.namespace, resources)
+	targets, err := pkgUtil.BuildResources(options.namespace, resources)
 	if err != nil {
 		return nil, err
 	}
 
 	var toRes, fromRes *pb.Resource
 	if options.toResource != "" {
-		toRes, err = coreUtil.BuildResource(options.toNamespace, options.toResource)
+		toRes, err = pkgUtil.BuildResource(options.toNamespace, options.toResource)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if options.fromResource != "" {
-		fromRes, err = coreUtil.BuildResource(options.fromNamespace, options.fromResource)
+		fromRes, err = pkgUtil.BuildResource(options.fromNamespace, options.fromResource)
 		if err != nil {
 			return nil, err
 		}

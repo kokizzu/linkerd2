@@ -6,36 +6,36 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"syscall"
 
-	"github.com/linkerd/linkerd2/pkg/flags"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+
 	"github.com/linkerd/linkerd2/pkg/tls"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
+	envDir          = "LINKERD2_PROXY_IDENTITY_DIR"
 	envDisabled     = "LINKERD2_PROXY_IDENTITY_DISABLED"
+	envLocalName    = "LINKERD2_PROXY_IDENTITY_LOCAL_NAME"
 	envTrustAnchors = "LINKERD2_PROXY_IDENTITY_TRUST_ANCHORS"
 )
 
 func main() {
-	cmd := flag.NewFlagSet("public-api", flag.ExitOnError)
-
-	name := cmd.String("name", "", "identity name")
-	dir := cmd.String("dir", "", "directory under which credentials are written")
-
-	flags.ConfigureAndParse(cmd, os.Args[1:])
+	defer runProxy()
 
 	if os.Getenv(envDisabled) != "" {
 		log.Debug("Identity disabled.")
-		os.Exit(0)
+		return
 	}
 
-	keyPath, csrPath, err := checkEndEntityDir(*dir)
+	dir := os.Getenv(envDir)
+	keyPath, csrPath, err := checkEndEntityDir(dir)
 	if err != nil {
 		log.Fatalf("Invalid end-entity directory: %s", err)
 	}
@@ -49,7 +49,8 @@ func main() {
 		log.Fatal(err.Error())
 	}
 
-	if _, err := generateAndStoreCSR(csrPath, *name, key); err != nil {
+	name := os.Getenv(envLocalName)
+	if _, err := generateAndStoreCSR(csrPath, name, key); err != nil {
 		log.Fatal(err.Error())
 	}
 }
@@ -126,9 +127,12 @@ func generateAndStoreKey(p string) (key *ecdsa.PrivateKey, err error) {
 }
 
 func generateAndStoreCSR(p, id string, key *ecdsa.PrivateKey) ([]byte, error) {
-	// TODO do proper DNS name validation.
 	if id == "" {
 		return nil, errors.New("a non-empty identity is required")
+	}
+
+	if err := validation.IsFullyQualifiedDomainName(field.NewPath(""), id).ToAggregate(); err != nil {
+		return nil, fmt.Errorf("%s a fully qualified DNS name is required", id)
 	}
 
 	csr := x509.CertificateRequest{
@@ -145,4 +149,11 @@ func generateAndStoreCSR(p, id string, key *ecdsa.PrivateKey) ([]byte, error) {
 	}
 
 	return csrb, nil
+}
+
+func runProxy() {
+	err := syscall.Exec("/usr/lib/linkerd/linkerd2-proxy", []string{}, os.Environ())
+	if err != nil {
+		log.Fatalf("Failed to run proxy: %s", err)
+	}
 }

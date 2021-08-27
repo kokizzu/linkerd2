@@ -1319,13 +1319,6 @@ status:
 								{
 									Table: &pb.StatTable_PodGroup_{
 										PodGroup: &pb.StatTable_PodGroup{
-											Rows: []*pb.StatTable_PodGroup_Row{},
-										},
-									},
-								},
-								{
-									Table: &pb.StatTable_PodGroup_{
-										PodGroup: &pb.StatTable_PodGroup{
 											Rows: []*pb.StatTable_PodGroup_Row{
 												{
 													Resource: &pb.Resource{
@@ -1413,13 +1406,16 @@ status:
 											Rows: []*pb.StatTable_PodGroup_Row{
 												{
 													Resource: &pb.Resource{
-														Namespace: "emojivoto",
-														Type:      pkgK8s.Service,
-														Name:      "emoji-svc",
+														Type: pkgK8s.Service,
 													},
-													TimeWindow:      "1m",
-													MeshedPodCount:  1,
-													RunningPodCount: 1,
+													TimeWindow: "1m",
+													Stats: &pb.BasicStats{
+														SuccessCount: 123,
+														FailureCount: 0,
+														LatencyMsP50: 123,
+														LatencyMsP95: 123,
+														LatencyMsP99: 123,
+													},
 												},
 											},
 										},
@@ -1521,29 +1517,6 @@ status:
 				req: &pb.StatSummaryRequest{
 					Selector: &pb.ResourceSelection{
 						Resource: &pb.Resource{
-							Type: pkgK8s.Service,
-						},
-					},
-				},
-			},
-			{
-				req: &pb.StatSummaryRequest{
-					Selector: &pb.ResourceSelection{
-						Resource: &pb.Resource{
-							Type: pkgK8s.Service,
-						},
-					},
-					Outbound: &pb.StatSummaryRequest_ToResource{
-						ToResource: &pb.Resource{
-							Type: pkgK8s.Pod,
-						},
-					},
-				},
-			},
-			{
-				req: &pb.StatSummaryRequest{
-					Selector: &pb.ResourceSelection{
-						Resource: &pb.Resource{
 							Type: pkgK8s.Pod,
 						},
 					},
@@ -1575,6 +1548,29 @@ status:
 					Outbound: &pb.StatSummaryRequest_ToResource{
 						ToResource: &pb.Resource{
 							Type: pkgK8s.Service,
+						},
+					},
+				},
+			},
+			{
+				req: &pb.StatSummaryRequest{
+					Selector: &pb.ResourceSelection{
+						Resource: &pb.Resource{
+							Type: pkgK8s.Service,
+						},
+					},
+				},
+			},
+			{
+				req: &pb.StatSummaryRequest{
+					Selector: &pb.ResourceSelection{
+						Resource: &pb.Resource{
+							Type: pkgK8s.Service,
+						},
+					},
+					Outbound: &pb.StatSummaryRequest_ToResource{
+						ToResource: &pb.Resource{
+							Type: pkgK8s.Pod,
 						},
 					},
 				},

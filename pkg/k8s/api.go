@@ -147,6 +147,15 @@ func (kubeAPI *KubernetesAPI) NamespaceExists(ctx context.Context, namespace str
 	return ns != nil, nil
 }
 
+// GetNodes returs all the nodes in a cluster.
+func (kubeAPI *KubernetesAPI) GetNodes(ctx context.Context) ([]corev1.Node, error) {
+	nodes, err := kubeAPI.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return nodes.Items, nil
+}
+
 // GetPodsByNamespace returns all pods in a given namespace
 func (kubeAPI *KubernetesAPI) GetPodsByNamespace(ctx context.Context, namespace string) ([]corev1.Pod, error) {
 	podList, err := kubeAPI.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
@@ -271,18 +280,8 @@ func GetProxyVersion(pod corev1.Pod) string {
 	for _, container := range pod.Spec.Containers {
 		if container.Name == ProxyContainerName {
 			parts := strings.Split(container.Image, ":")
-			return parts[1]
+			return parts[len(parts)-1]
 		}
 	}
 	return ""
-}
-
-// GetAddOnsConfigMap returns the data in the add-ons configmap
-func GetAddOnsConfigMap(ctx context.Context, kubeAPI kubernetes.Interface, namespace string) (map[string]string, error) {
-	cm, err := kubeAPI.CoreV1().ConfigMaps(namespace).Get(ctx, AddOnsConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	return cm.Data, nil
 }

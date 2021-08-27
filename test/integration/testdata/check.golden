@@ -18,6 +18,7 @@ linkerd-existence
 √ control plane replica sets are ready
 √ no unschedulable pods
 √ control plane pods are ready
+√ cluster networks contains all node podCIDRs
 
 linkerd-config
 --------------
@@ -28,7 +29,6 @@ linkerd-config
 √ control plane CustomResourceDefinitions exist
 √ control plane MutatingWebhookConfigurations exist
 √ control plane ValidatingWebhookConfigurations exist
-√ control plane PodSecurityPolicies exist
 
 linkerd-identity
 ----------------
@@ -47,6 +47,8 @@ linkerd-webhooks-and-apisvc-tls
 √ proxy-injector cert is valid for at least 60 days
 √ sp-validator webhook has valid cert
 √ sp-validator cert is valid for at least 60 days
+√ policy-validator webhook has valid cert
+√ policy-validator cert is valid for at least 60 days
 
 linkerd-version
 ---------------

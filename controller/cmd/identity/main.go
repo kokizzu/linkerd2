@@ -2,9 +2,9 @@ package identity
 
 import (
 	"context"
-	"encoding/base64"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/signal"
@@ -24,12 +24,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	v1machinery "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
 )
-
-const envTrustAnchors = "LINKERD2_IDENTITY_TRUST_ANCHORS"
 
 // Main executes the identity subcommand
 func Main(args []string) {
@@ -55,13 +54,11 @@ func Main(args []string) {
 
 	flags.ConfigureAndParse(cmd, args)
 
-	encodedIdentityTrustAnchorPEM := os.Getenv(envTrustAnchors)
-	rawPEM, err := base64.StdEncoding.DecodeString(encodedIdentityTrustAnchorPEM)
+	identityTrustAnchorPEM, err := ioutil.ReadFile(k8s.MountPathTrustRootsPEM)
 	if err != nil {
-		log.Fatalf("could not decode identity trust anchors PEM: %s", err.Error())
+		log.Fatalf("could not read identity trust anchors PEM: %s", err.Error())
 	}
 
-	identityTrustAnchorPEM := string(rawPEM)
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,7 +82,7 @@ func Main(args []string) {
 		log.Fatalf("Invalid trust domain: %s", err.Error())
 	}
 
-	trustAnchors, err := tls.DecodePEMCertPool(identityTrustAnchorPEM)
+	trustAnchors, err := tls.DecodePEMCertPool(string(identityTrustAnchorPEM))
 	if err != nil {
 		log.Fatalf("Failed to read trust anchors: %s", err)
 	}
@@ -140,7 +137,7 @@ func Main(args []string) {
 	// Create K8s event recorder
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{
-		Interface: k8sAPI.CoreV1().Events(*controllerNS),
+		Interface: k8sAPI.CoreV1().Events(""),
 	})
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: componentName})
 	deployment, err := k8sAPI.AppsV1().Deployments(*controllerNS).Get(ctx, componentName, v1machinery.GetOptions{})
@@ -149,8 +146,11 @@ func Main(args []string) {
 		log.Fatalf("Failed to construct k8s event recorder: %s", err)
 	}
 
-	recordEventFunc := func(eventType, reason, message string) {
-		recorder.Event(deployment, eventType, reason, message)
+	recordEventFunc := func(parent runtime.Object, eventType, reason, message string) {
+		if parent == nil {
+			parent = deployment
+		}
+		recorder.Event(parent, eventType, reason, message)
 	}
 
 	//

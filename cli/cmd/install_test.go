@@ -55,6 +55,25 @@ func TestRender(t *testing.T) {
 		IdentityTrustAnchorsPEM: defaultValues.IdentityTrustAnchorsPEM,
 		PodAnnotations:          map[string]string{},
 		PodLabels:               map[string]string{},
+		PolicyController: &charts.PolicyController{
+			Image: &charts.Image{
+				Name:       "PolicyControllerImageName",
+				PullPolicy: "ImagePullPolicy",
+				Version:    "PolicyControllerVersion",
+			},
+			LogLevel:           "log-level",
+			DefaultAllowPolicy: "default-allow-policy",
+			Resources: &charts.Resources{
+				CPU: charts.Constraints{
+					Limit:   "cpu-limit",
+					Request: "cpu-request",
+				},
+				Memory: charts.Constraints{
+					Limit:   "memory-limit",
+					Request: "memory-request",
+				},
+			},
+		},
 		Proxy: &charts.Proxy{
 			Image: &charts.Image{
 				Name:       "ProxyImageName",
@@ -119,6 +138,7 @@ func TestRender(t *testing.T) {
 		ControllerReplicas: 1,
 		ProxyInjector:      defaultValues.ProxyInjector,
 		ProfileValidator:   defaultValues.ProfileValidator,
+		PolicyValidator:    defaultValues.PolicyValidator,
 	}
 
 	haValues, err := testInstallOptionsHA(true)
@@ -535,4 +555,7 @@ func addFakeTLSSecrets(values *charts.Values) {
 	values.ProfileValidator.CrtPEM = "profile validator crt"
 	values.ProfileValidator.KeyPEM = "profile validator key"
 	values.ProfileValidator.CaBundle = "profile validator CA bundle"
+	values.PolicyValidator.CrtPEM = "policy validator crt"
+	values.PolicyValidator.KeyPEM = "policy validator key"
+	values.PolicyValidator.CaBundle = "policy validator CA bundle"
 }

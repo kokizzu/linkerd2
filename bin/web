@@ -14,8 +14,6 @@ USAGE: web <command>
   * build - build the assets
   * dev - run a dev server (with live reloading). Options:
       -p $DEV_PORT
-  * integration (cloud|local) - run the integration tests
-      Note: Sauce Connect tunnel must be open for cloud tests
   * port-forward - setup a tunnel to a controller component and port
       Example: port-forward linkerd controller 8085
   * run - run a local server (sans. reloading)
@@ -27,14 +25,8 @@ USAGE
 }; function --help { '-h' ;}
 
 check-for-linkerd-and-viz() {
-  controller_pod=$(get-pod linkerd controller)
   metrics_api_pod=$(get-pod linkerd-viz metrics-api)
   grafana_pod=$(get-pod linkerd-viz grafana)
-
-  if [[ -z "${controller_pod// }" ]]; then
-    err 'Controller is not running. Have you installed Linkerd?'
-    exit 1
-  fi
 
   if [[ -z "${metrics_api_pod// }" ]]; then
     err 'Metrics-api is not running. Have you installed Linkerd-Viz?'
@@ -111,7 +103,6 @@ run() {
   build
 
   check-for-linkerd-and-viz && (
-    port-forward linkerd controller 8185 8085 &
     port-forward linkerd-viz metrics-api 8085 &
     port-forward linkerd-viz grafana 3000 &
   )
@@ -128,20 +119,6 @@ setup() {
 function test {
   cd "$ROOT"/web/app
   yarn jest "$@"
-}
-
-integration() {
-  if [[ $# -ne 1 || ($1 != "cloud" && $1 != "local") ]]; then
-    echo "usage: bin/${0##*/} integration (cloud|local)" >&2
-    exit 1
-  fi
-  if [ "$1" = cloud ]; then
-    cd "$ROOT"/web/app && \
-    ./node_modules/.bin/wdio ./integration/wdio-sauce.conf.js
-  else
-    cd "$ROOT"/web/app && \
-    ./node_modules/.bin/wdio ./integration/wdio.conf.js
-  fi
 }
 
 main() {
