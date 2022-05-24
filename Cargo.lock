@@ -759,16 +759,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "k8s-openapi"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ae2c04fcee6b01b04e3aadd56bb418932c8e0a9d8a93f48bc68c6bdcdb559d"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "serde",
+ "serde-value",
+ "serde_json",
+]
+
+[[package]]
 name = "kube"
 version = "0.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977951a1d7dbce4c6f9c2cbed0711f568df9944010fafa88161a20f7e5163bd3"
 dependencies = [
- "k8s-openapi",
- "kube-client",
- "kube-core",
+ "k8s-openapi 0.14.0",
+ "kube-client 0.72.0",
+ "kube-core 0.72.0",
  "kube-derive",
- "kube-runtime",
+ "kube-runtime 0.72.0",
 ]
 
 [[package]]
@@ -791,8 +805,8 @@ dependencies = [
  "hyper-timeout",
  "hyper-tls",
  "jsonpath_lib",
- "k8s-openapi",
- "kube-core",
+ "k8s-openapi 0.14.0",
+ "kube-core 0.72.0",
  "openssl",
  "pem",
  "pin-project",
@@ -814,6 +828,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "kube-client"
+version = "0.73.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcd54b663fef0f0bdc75666821262cd8bee03ffa45ded04cee0f07d2ba0288f0"
+dependencies = [
+ "base64",
+ "bytes",
+ "chrono",
+ "dirs-next",
+ "either",
+ "futures",
+ "http",
+ "http-body",
+ "hyper",
+ "hyper-timeout",
+ "jsonpath_lib",
+ "k8s-openapi 0.15.0",
+ "kube-core 0.73.0",
+ "pem",
+ "pin-project",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.0",
+ "tower",
+ "tower-http",
+ "tracing",
+]
+
+[[package]]
 name = "kube-core"
 version = "0.72.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -823,9 +870,26 @@ dependencies = [
  "form_urlencoded",
  "http",
  "json-patch",
- "k8s-openapi",
+ "k8s-openapi 0.14.0",
  "once_cell",
  "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "kube-core"
+version = "0.73.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1eef68b0918b741d0cb20a54ffc06b197770584fa417180af4b398f848a381e6"
+dependencies = [
+ "chrono",
+ "form_urlencoded",
+ "http",
+ "json-patch",
+ "k8s-openapi 0.15.0",
+ "once_cell",
  "serde",
  "serde_json",
  "thiserror",
@@ -855,8 +919,32 @@ dependencies = [
  "derivative",
  "futures",
  "json-patch",
- "k8s-openapi",
- "kube-client",
+ "k8s-openapi 0.14.0",
+ "kube-client 0.72.0",
+ "parking_lot",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.0",
+ "tracing",
+]
+
+[[package]]
+name = "kube-runtime"
+version = "0.73.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cce6c2a4ae58f1610bbf639280110035ab2ac624af112b5239851c793e1af0c0"
+dependencies = [
+ "ahash",
+ "backoff",
+ "derivative",
+ "futures",
+ "json-patch",
+ "k8s-openapi 0.15.0",
+ "kube-client 0.73.0",
  "parking_lot",
  "pin-project",
  "serde",
@@ -870,9 +958,9 @@ dependencies = [
 
 [[package]]
 name = "kubert"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26e7528462e3f48d9a5693e7c27ecb6c7e1615829cd6ff542def596afdd9e944"
+checksum = "e3583ea5ed19b357df067fa668fc00ddac5d6945a5803e2114c3ed000af1f3cf"
 dependencies = [
  "ahash",
  "clap",
@@ -880,9 +968,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hyper",
- "kube-client",
- "kube-core",
- "kube-runtime",
+ "kube-client 0.73.0",
+ "kube-core 0.73.0",
+ "kube-runtime 0.73.0",
  "parking_lot",
  "pin-project-lite",
  "rustls-pemfile",
@@ -934,7 +1022,7 @@ dependencies = [
  "hyper",
  "ipnet",
  "jemallocator",
- "k8s-openapi",
+ "k8s-openapi 0.14.0",
  "kube",
  "kubert",
  "linkerd-policy-controller-core",
@@ -983,7 +1071,7 @@ name = "linkerd-policy-controller-k8s-api"
 version = "0.1.0"
 dependencies = [
  "ipnet",
- "k8s-openapi",
+ "k8s-openapi 0.14.0",
  "kube",
  "schemars",
  "serde",
@@ -1021,7 +1109,7 @@ dependencies = [
  "futures",
  "hyper",
  "ipnet",
- "k8s-openapi",
+ "k8s-openapi 0.14.0",
  "kube",
  "linkerd-policy-controller-core",
  "linkerd-policy-controller-k8s-api",
